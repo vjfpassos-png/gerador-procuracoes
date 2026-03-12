@@ -296,36 +296,37 @@ function StepTipo({ form, setForm }) {
 // ─── Step 2: Template ───
 function StepTemplate({ form, setForm }) {
   const [dragOver, setDragOver] = useState(false);
-  const [preview, setPreview] = useState("");
-  const [vars, setVars] = useState([]);
   const [error, setError] = useState("");
   const fileRef = useRef(null);
+
+  const allowedExts = [".docx", ".doc", ".pdf"];
+  const getExt = (name) => name ? "." + name.split(".").pop().toLowerCase() : "";
 
   const parse = async (file) => {
     if (!file) return;
     setError("");
+    const ext = getExt(file.name);
+    if (!allowedExts.includes(ext)) {
+      setError("Formato não suportado. Envie um .docx, .doc ou .pdf");
+      return;
+    }
     const ab = await file.arrayBuffer();
-    setForm(f => ({ ...f, templateFile: file, templateFileName: file.name, templateArrayBuffer: ab }));
-    try {
-      const result = await mammoth.extractRawText({ arrayBuffer: ab });
-      const text = result.value;
-      setPreview(text.substring(0, 600) + (text.length > 600 ? "..." : ""));
-      const found = [...new Set(text.match(/\{\{[A-Z_]+\}\}/g) || [])];
-      setVars(found);
-      setForm(f => ({ ...f, templateVars: found, templateText: text }));
-    } catch { setError("Erro ao ler o arquivo."); }
+    setForm(f => ({ ...f, templateFile: file, templateFileName: file.name, templateArrayBuffer: ab, templateExt: ext }));
   };
 
   const remove = () => {
-    setForm(f => ({ ...f, templateFile: null, templateFileName: "", templateArrayBuffer: null, templateVars: [], templateText: "" }));
-    setPreview(""); setVars([]); setError("");
+    setForm(f => ({ ...f, templateFile: null, templateFileName: "", templateArrayBuffer: null, templateExt: "" }));
+    setError("");
   };
+
+  const ext = form.templateExt || "";
+  const isDocx = ext === ".docx";
 
   return (
     <div>
-      <H2>Template do Documento</H2><Sub>Use seu modelo .docx ou gere com IA</Sub>
+      <H2>Papel Timbrado</H2><Sub>Use o papel timbrado de um documento existente ou gere sem timbrado</Sub>
       <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
-        {[{ id: "ai", label: "Gerar com IA", icon: "✦" }, { id: "template", label: "Meu template .docx", icon: "↑" }].map(m => (
+        {[{ id: "ai", label: "Sem timbrado", icon: "✦" }, { id: "template", label: "Usar meu timbrado", icon: "↑" }].map(m => (
           <button key={m.id} onClick={() => setForm(f => ({ ...f, templateMode: m.id }))}
             style={{ flex: 1, padding: "14px", borderRadius: "10px",
               border: `2px solid ${form.templateMode === m.id ? tk.accent : tk.border}`,
@@ -342,75 +343,51 @@ function StepTemplate({ form, setForm }) {
         <>
           {!form.templateFileName ? (
             <div onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
-              onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f?.name.endsWith(".docx")) parse(f); else setError("Envie um .docx"); }}
+              onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) parse(f); }}
               onClick={() => fileRef.current?.click()}
               style={{ border: `2px dashed ${dragOver ? tk.accent : tk.border}`, borderRadius: "12px", padding: "48px 24px",
                 textAlign: "center", cursor: "pointer", background: dragOver ? `${tk.accent}08` : "transparent" }}>
               <div style={{ fontSize: "36px", marginBottom: "12px", opacity: 0.6 }}>📄</div>
-              <div style={{ fontFamily: sans, fontSize: "15px", color: tk.text, fontWeight: 600, marginBottom: "6px" }}>Arraste seu template .docx aqui</div>
-              <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted }}>ou clique para selecionar</div>
-              <input ref={fileRef} type="file" accept=".docx" onChange={e => { if (e.target.files[0]) parse(e.target.files[0]); }} style={{ display: "none" }} />
+              <div style={{ fontFamily: sans, fontSize: "15px", color: tk.text, fontWeight: 600, marginBottom: "6px" }}>Arraste um documento com seu papel timbrado</div>
+              <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted }}>Aceita .docx, .doc ou .pdf — pode ser qualquer documento do escritório</div>
+              <input ref={fileRef} type="file" accept=".docx,.doc,.pdf" onChange={e => { if (e.target.files[0]) parse(e.target.files[0]); }} style={{ display: "none" }} />
             </div>
           ) : (
             <div style={{ background: tk.surface, borderRadius: "10px", border: `1px solid ${tk.accent}44`, padding: "16px 20px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{ fontSize: "20px" }}>📄</span>
+                  <span style={{ fontSize: "20px" }}>{ext === ".pdf" ? "📕" : "📄"}</span>
                   <div>
                     <div style={{ fontFamily: sans, fontSize: "14px", fontWeight: 600, color: tk.text }}>{form.templateFileName}</div>
-                    <div style={{ fontFamily: sans, fontSize: "12px", color: tk.success }}>✓ Carregado</div>
+                    <div style={{ fontFamily: sans, fontSize: "12px", color: tk.success }}>✓ Arquivo carregado</div>
                   </div>
                 </div>
                 <button onClick={remove} style={{ background: "none", border: "none", color: tk.danger, cursor: "pointer", fontSize: "18px" }}>✕</button>
               </div>
-              {vars.length > 0 && (
-                <div style={{ padding: "12px 16px", background: `${tk.accent}08`, borderRadius: "8px", border: `1px solid ${tk.accent}22`, marginBottom: "12px" }}>
-                  <div style={{ fontFamily: sans, fontSize: "12px", fontWeight: 700, color: tk.accent, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>
-                    Variáveis detectadas ({vars.length})
+              <div style={{ padding: "12px 16px", background: `${tk.accent}08`, borderRadius: "8px", border: `1px solid ${tk.accent}22` }}>
+                {isDocx ? (
+                  <div style={{ fontFamily: sans, fontSize: "12px", color: tk.textMuted, lineHeight: "1.6" }}>
+                    O cabeçalho, rodapé, logo e formatação serão preservados. O conteúdo será substituído pela nova procuração gerada por IA.
                   </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                    {vars.map(v => <span key={v} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px", fontFamily: "monospace", background: `${tk.accent}15`, color: tk.accentLight, border: `1px solid ${tk.accent}33` }}>{v}</span>)}
+                ) : (
+                  <div style={{ fontFamily: sans, fontSize: "12px", color: tk.textMuted, lineHeight: "1.6" }}>
+                    <span style={{ color: tk.accent, fontWeight: 600 }}>Formato {ext.toUpperCase().replace(".", "")}</span> — A procuração será gerada por IA normalmente. Para download com papel timbrado incorporado, use um arquivo .docx.
+                    Você ainda poderá copiar o texto ou salvar como PDF.
                   </div>
-                </div>
-              )}
-              {preview && (
-                <div>
-                  <div style={{ fontFamily: sans, fontSize: "12px", fontWeight: 700, color: tk.textMuted, textTransform: "uppercase", marginBottom: "6px" }}>Pré-visualização</div>
-                  <div style={{ padding: "12px", background: tk.bg, borderRadius: "8px", fontFamily: "Georgia, serif", fontSize: "13px", color: tk.textMuted, lineHeight: "1.6", maxHeight: "140px", overflowY: "auto", whiteSpace: "pre-wrap" }}>{preview}</div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
           {error && <div style={{ color: tk.danger, fontSize: "13px", marginTop: "8px" }}>{error}</div>}
-          <div style={{ marginTop: "20px" }}>
-            <div style={{ fontFamily: sans, fontSize: "13px", color: tk.accent, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
-              onClick={() => setForm(f => ({ ...f, showVarGuide: !f.showVarGuide }))}>
-              <span style={{ transform: form.showVarGuide ? "rotate(90deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▶</span>
-              Guia de variáveis
-            </div>
-            {form.showVarGuide && (
-              <div style={{ marginTop: "10px", padding: "16px", background: tk.surface, borderRadius: "8px", border: `1px solid ${tk.border}`, maxHeight: "220px", overflowY: "auto" }}>
-                <p style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted, marginTop: 0, marginBottom: "12px" }}>Insira estas variáveis no seu .docx:</p>
-                <div style={{ display: "grid", gap: "5px" }}>
-                  {VARIABLE_GUIDE.map(item => (
-                    <div key={item.v} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <code style={{ fontFamily: "monospace", fontSize: "11px", padding: "3px 8px", background: `${tk.accent}10`, color: tk.accentLight, borderRadius: "4px", border: `1px solid ${tk.accent}22`, whiteSpace: "nowrap", minWidth: "210px" }}>{item.v}</code>
-                      <span style={{ fontFamily: sans, fontSize: "12px", color: tk.textMuted }}>{item.d}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
         </>
       )}
 
       {form.templateMode === "ai" && (
         <div style={{ padding: "24px", borderRadius: "10px", border: `1px solid ${tk.border}`, background: tk.surface, textAlign: "center" }}>
           <div style={{ fontSize: "32px", marginBottom: "12px" }}>✦</div>
-          <div style={{ fontFamily: sans, fontSize: "15px", fontWeight: 600, color: tk.text, marginBottom: "6px" }}>Geração automática com IA</div>
+          <div style={{ fontFamily: sans, fontSize: "15px", fontWeight: 600, color: tk.text, marginBottom: "6px" }}>Geração sem timbrado</div>
           <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted, maxWidth: "360px", margin: "0 auto" }}>
-            A procuração será gerada do zero pela IA com formatação jurídica padrão.
+            A procuração será gerada pela IA em formato texto. Você pode copiar, salvar como PDF ou colar no seu modelo.
           </div>
         </div>
       )}
@@ -616,7 +593,7 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
 
   const cards = [
     { t: "Tipo", c: tipoLabel },
-    { t: "Template", c: form.templateMode === "template" ? `📄 ${form.templateFileName}` : "✦ Gerado por IA" },
+    { t: "Timbrado", c: form.templateMode === "template" ? `📄 ${form.templateFileName}` : "Sem timbrado" },
     { t: `Outorgante${form.outorgantes.length > 1 ? "s" : ""} (${form.outorgantes.length})`, c: outorgantesSummary },
     { t: `Outorgado${form.outorgados.length > 1 ? "s" : ""} (${form.outorgados.length})`, c: outorgadosSummary },
     { t: "Foro", c: foro },
@@ -663,9 +640,9 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
               style={{ ...btnP, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
               📄 Salvar PDF
             </button>
-            {form.templateMode === "template" && form.templateArrayBuffer && (
+            {form.templateMode === "template" && form.templateArrayBuffer && form.templateExt === ".docx" && (
               <button onClick={onGerarDocx} style={{ ...btnS, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", borderColor: tk.accent }}>
-                {docxReady ? "✓ Baixado!" : "📥 Baixar .docx"}
+                {docxReady ? "✓ Baixado!" : "📥 Baixar .docx com timbrado"}
               </button>
             )}
           </div>
@@ -686,8 +663,7 @@ export default function App() {
 
   const [form, setForm] = useState({
     tipo: "ad_judicia", templateMode: "ai",
-    templateFile: null, templateFileName: "", templateArrayBuffer: null,
-    templateVars: [], templateText: "", showVarGuide: false,
+    templateFile: null, templateFileName: "", templateArrayBuffer: null, templateExt: "",
     outorgantes: [emptyOutorgante()],
     outorgados: [emptyOutorgado()],
     poderesSelecionados: [], poderesExtras: "", foro: "",
@@ -707,13 +683,6 @@ export default function App() {
     const tipoLabel = TIPOS_PROCURACAO.find(x => x.id === form.tipo)?.label || form.tipo;
     const foro = form.foro || "";
     const poderes = [...(form.poderesSelecionados || []), ...(form.poderesExtras ? [form.poderesExtras] : [])].join(";\n");
-
-    if (form.templateMode === "template" && form.templateText) {
-      const map = buildVarMap(form);
-      let filled = form.templateText;
-      for (const [k, v] of Object.entries(map)) filled = filled.replaceAll(k, v || "[não informado]");
-      setResultado(filled); setLoading(false); return;
-    }
 
     try {
       const res = await fetch("/.netlify/functions/gerar-procuracao", {
@@ -739,34 +708,59 @@ export default function App() {
   };
 
   const gerarDocx = async () => {
-    if (!form.templateArrayBuffer) return;
+    if (!form.templateArrayBuffer || !resultado) return;
     try {
-      const map = buildVarMap(form);
       const zip = await JSZip.loadAsync(form.templateArrayBuffer);
-      const xmlFiles = Object.keys(zip.files).filter(n => n.startsWith("word/") && n.endsWith(".xml"));
-      for (const fn of xmlFiles) {
-        let content = await zip.file(fn).async("string");
-        for (const [key, val] of Object.entries(map)) {
-          const safe = (val || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-          content = content.replaceAll(key, safe);
-          const varName = key.replace(/[{}]/g, "");
-          const splitRe = new RegExp(
-            "\\{\\{(?:</w:t>[^]*?<w:t[^>]*>)?" + varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "(?:</w:t>[^]*?<w:t[^>]*>)?\\}\\}",
-            "g"
-          );
-          content = content.replace(splitRe, safe);
-        }
-        zip.file(fn, content);
+
+      // Read the document.xml (body content)
+      const docXml = await zip.file("word/document.xml").async("string");
+
+      // Find the <w:body> content and replace everything between the first <w:body> and </w:body>
+      // but PRESERVE the <w:sectPr> (section properties - margins, page size, header/footer refs)
+      const bodyMatch = docXml.match(/<w:body>([\s\S]*)<\/w:body>/);
+      if (!bodyMatch) {
+        alert("Erro: não foi possível localizar o corpo do documento.");
+        return;
       }
+
+      // Extract sectPr (section properties - contains header/footer references, margins, page size)
+      const sectPrMatch = bodyMatch[1].match(/<w:sectPr[\s\S]*<\/w:sectPr>/);
+      const sectPr = sectPrMatch ? sectPrMatch[0] : "";
+
+      // Convert AI-generated text into proper docx XML paragraphs
+      const lines = resultado.split("\n");
+      const paragraphs = lines.map(line => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>`;
+        }
+        // Check if line looks like a title/header (all caps or short centered text)
+        const isTitle = trimmed === trimmed.toUpperCase() && trimmed.length < 80 && trimmed.length > 3;
+        const rPr = isTitle
+          ? `<w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`
+          : `<w:rPr><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
+        const pPr = isTitle
+          ? `<w:pPr><w:jc w:val="center"/><w:spacing w:after="200"/></w:pPr>`
+          : `<w:pPr><w:jc w:val="both"/><w:spacing w:after="120" w:line="360" w:lineRule="auto"/></w:pPr>`;
+        const safeText = trimmed.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${safeText}</w:t></w:r></w:p>`;
+      }).join("");
+
+      // Build new body with AI content + preserved section properties
+      const newBody = `<w:body>${paragraphs}${sectPr}</w:body>`;
+      const newDocXml = docXml.replace(/<w:body>[\s\S]*<\/w:body>/, newBody);
+
+      zip.file("word/document.xml", newDocXml);
+
       const blob = await zip.generateAsync({ type: "blob" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `procuracao_${form.outorgantes[0]?.nome.replace(/\s+/g, "_") || "preenchida"}.docx`;
+      a.href = url; a.download = `procuracao_${form.outorgantes[0]?.nome.replace(/\s+/g, "_") || "nova"}.docx`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url); setDocxReady(true);
     } catch (err) {
       console.error(err);
-      alert("Erro ao gerar o .docx.");
+      alert("Erro ao gerar o .docx: " + err.message);
     }
   };
 
