@@ -47,6 +47,7 @@ const VARIABLE_GUIDE = [
   { v: "{{RG_OUTORGANTE}}", d: "RG do outorgante" },
   { v: "{{ORGAO_EXPEDIDOR}}", d: "Órgão expedidor do RG" },
   { v: "{{ENDERECO_OUTORGANTE}}", d: "Endereço completo" },
+  { v: "{{OUTORGANTES}}", d: "Dados de todos os outorgantes" },
   { v: "{{OUTORGADOS}}", d: "Dados de todos os outorgados" },
   { v: "{{PODERES}}", d: "Descrição dos poderes concedidos" },
   { v: "{{FORO}}", d: "Comarca / Foro eleito" },
@@ -85,6 +86,7 @@ const btnS = {
 };
 
 // ─── Helpers ───
+const emptyOutorgante = () => ({ nome: "", nacionalidade: "brasileiro(a)", estadoCivil: "", profissao: "", cpf: "", rg: "", orgaoExpedidor: "", endereco: "" });
 const emptyOutorgado = () => ({ nome: "", nacionalidade: "brasileiro(a)", profissao: "", cpf: "", oab: "", endereco: "" });
 
 function buildVarMap(form) {
@@ -92,21 +94,27 @@ function buildVarMap(form) {
   const poderes = [...(form.poderesSelecionados || []), ...(form.poderesExtras ? [form.poderesExtras] : [])].join("; ");
   const meses = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
   const now = new Date();
-  const outorgadosTexto = form.outorgados.map(o => {
+  const outorgadosTexto = form.outorgados.map((o, i) => {
     let t = `${o.nome}, ${o.nacionalidade}, ${o.profissao}, CPF ${o.cpf}`;
     if (o.oab) t += `, OAB ${o.oab}`;
-    t += `, com endereço profissional em ${o.endereco}`;
+    const end = i === 0 ? o.endereco : (o.endereco || form.outorgados[0].endereco);
+    if (end) t += `, com endereço profissional em ${end}`;
     return t;
   }).join("; e ");
+  const outorgantesTexto = form.outorgantes.map(o => {
+    return `${o.nome}, ${o.nacionalidade}, ${o.estadoCivil}, ${o.profissao}, CPF ${o.cpf}, RG ${o.rg} - ${o.orgaoExpedidor}, residente em ${o.endereco}`;
+  }).join("; e ");
+  const o1 = form.outorgantes[0] || {};
   return {
-    "{{NOME_OUTORGANTE}}": form.outorgante.nome,
-    "{{NACIONALIDADE_OUTORGANTE}}": form.outorgante.nacionalidade,
-    "{{ESTADO_CIVIL}}": form.outorgante.estadoCivil,
-    "{{PROFISSAO_OUTORGANTE}}": form.outorgante.profissao,
-    "{{CPF_OUTORGANTE}}": form.outorgante.cpf,
-    "{{RG_OUTORGANTE}}": form.outorgante.rg,
-    "{{ORGAO_EXPEDIDOR}}": form.outorgante.orgaoExpedidor,
-    "{{ENDERECO_OUTORGANTE}}": form.outorgante.endereco,
+    "{{NOME_OUTORGANTE}}": o1.nome || "",
+    "{{NACIONALIDADE_OUTORGANTE}}": o1.nacionalidade || "",
+    "{{ESTADO_CIVIL}}": o1.estadoCivil || "",
+    "{{PROFISSAO_OUTORGANTE}}": o1.profissao || "",
+    "{{CPF_OUTORGANTE}}": o1.cpf || "",
+    "{{RG_OUTORGANTE}}": o1.rg || "",
+    "{{ORGAO_EXPEDIDOR}}": o1.orgaoExpedidor || "",
+    "{{ENDERECO_OUTORGANTE}}": o1.endereco || "",
+    "{{OUTORGANTES}}": outorgantesTexto,
     "{{OUTORGADOS}}": outorgadosTexto,
     "{{NOME_OUTORGADO}}": form.outorgados[0]?.nome || "",
     "{{NACIONALIDADE_OUTORGADO}}": form.outorgados[0]?.nacionalidade || "",
@@ -120,21 +128,99 @@ function buildVarMap(form) {
   };
 }
 
-// ─── PDF Generator ───
-async function gerarPDF(texto) {
-  // Build a print-friendly HTML and use browser print
+// ─── PDF Generator with Letterhead ───
+async function extrairTimbrado(arrayBuffer) {
+  try {
+    const zip = await JSZip.loadAsync(arrayBuffer);
+
+    // Extract images from the docx (logos etc)
+    let logoBase64 = "";
+    const mediaFiles = Object.keys(zip.files).filter(n => n.startsWith("word/media/"));
+    if (mediaFiles.length > 0) {
+      // Get the first image (usually the logo)
+      const imgFile = mediaFiles[0];
+      const ext = imgFile.split(".").pop().toLowerCase();
+      const mimeMap = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", bmp: "image/bmp" };
+      const mime = mimeMap[ext] || "image/png";
+      const imgData = await zip.file(imgFile).async("base64");
+      logoBase64 = `data:${mime};base64,${imgData}`;
+    }
+
+    // Extract header text
+    let headerText = "";
+    const headerFiles = Object.keys(zip.files).filter(n => n.match(/word\/header\d*\.xml/));
+    for (const hf of headerFiles) {
+      const xml = await zip.file(hf).async("string");
+      // Extract text from <w:t> tags
+      const texts = [];
+      xml.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (_, t) => { texts.push(t); });
+      if (texts.length > 0) {
+        headerText = texts.join(" ").trim();
+        break; // Use first header with content
+      }
+    }
+
+    // Extract footer text
+    let footerText = "";
+    const footerFiles = Object.keys(zip.files).filter(n => n.match(/word\/footer\d*\.xml/));
+    for (const ff of footerFiles) {
+      const xml = await zip.file(ff).async("string");
+      const texts = [];
+      xml.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (_, t) => { texts.push(t); });
+      if (texts.length > 0) {
+        footerText = texts.join(" | ").trim();
+        break;
+      }
+    }
+
+    return { logoBase64, headerText, footerText };
+  } catch (err) {
+    console.error("Erro ao extrair timbrado:", err);
+    return { logoBase64: "", headerText: "", footerText: "" };
+  }
+}
+
+async function gerarPDF(texto, templateArrayBuffer) {
+  let logo = "";
+  let header = "";
+  let footer = "";
+
+  if (templateArrayBuffer) {
+    const timbrado = await extrairTimbrado(templateArrayBuffer);
+    logo = timbrado.logoBase64;
+    header = timbrado.headerText;
+    footer = timbrado.footerText;
+  }
+
+  const safeTexto = texto.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const safeHeader = header.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const safeFooter = footer.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
-  @page { size: A4; margin: 2.5cm 3cm; }
-  body { font-family: 'Times New Roman', Georgia, serif; font-size: 13pt; line-height: 1.8; color: #000; white-space: pre-wrap; }
-</style></head><body>${texto.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`;
+  @page { size: A4; margin: 1.5cm 2.5cm 2cm 2.5cm; }
+  @media print { .no-print { display: none; } }
+  body { font-family: 'Times New Roman', Georgia, serif; font-size: 12pt; line-height: 1.7; color: #000; margin: 0; padding: 0; }
+  .letterhead { text-align: center; padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid #333; }
+  .letterhead img { max-height: 80px; max-width: 300px; margin-bottom: 8px; display: block; margin-left: auto; margin-right: auto; }
+  .letterhead .header-text { font-size: 10pt; color: #333; line-height: 1.5; }
+  .content { white-space: pre-wrap; text-align: justify; }
+  .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 8pt; color: #666; padding: 10px 2.5cm; border-top: 1px solid #ccc; }
+</style></head><body>
+${(logo || header) ? `<div class="letterhead">
+  ${logo ? `<img src="${logo}" alt="Logo" />` : ""}
+  ${header ? `<div class="header-text">${safeHeader}</div>` : ""}
+</div>` : ""}
+<div class="content">${safeTexto}</div>
+${footer ? `<div class="footer">${safeFooter}</div>` : ""}
+</body></html>`;
+
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   const w = window.open(url, "_blank");
   if (w) {
     w.onload = () => { w.print(); };
   } else {
-    // Fallback: download as HTML
     const a = document.createElement("a");
     a.href = url;
     a.download = "procuracao.html";
@@ -288,36 +374,37 @@ function StepTipo({ form, setForm }) {
 // ─── Step 2: Template ───
 function StepTemplate({ form, setForm }) {
   const [dragOver, setDragOver] = useState(false);
-  const [preview, setPreview] = useState("");
-  const [vars, setVars] = useState([]);
   const [error, setError] = useState("");
   const fileRef = useRef(null);
+
+  const allowedExts = [".docx", ".doc", ".pdf"];
+  const getExt = (name) => name ? "." + name.split(".").pop().toLowerCase() : "";
 
   const parse = async (file) => {
     if (!file) return;
     setError("");
+    const ext = getExt(file.name);
+    if (!allowedExts.includes(ext)) {
+      setError("Formato não suportado. Envie um .docx, .doc ou .pdf");
+      return;
+    }
     const ab = await file.arrayBuffer();
-    setForm(f => ({ ...f, templateFile: file, templateFileName: file.name, templateArrayBuffer: ab }));
-    try {
-      const result = await mammoth.extractRawText({ arrayBuffer: ab });
-      const text = result.value;
-      setPreview(text.substring(0, 600) + (text.length > 600 ? "..." : ""));
-      const found = [...new Set(text.match(/\{\{[A-Z_]+\}\}/g) || [])];
-      setVars(found);
-      setForm(f => ({ ...f, templateVars: found, templateText: text }));
-    } catch { setError("Erro ao ler o arquivo."); }
+    setForm(f => ({ ...f, templateFile: file, templateFileName: file.name, templateArrayBuffer: ab, templateExt: ext }));
   };
 
   const remove = () => {
-    setForm(f => ({ ...f, templateFile: null, templateFileName: "", templateArrayBuffer: null, templateVars: [], templateText: "" }));
-    setPreview(""); setVars([]); setError("");
+    setForm(f => ({ ...f, templateFile: null, templateFileName: "", templateArrayBuffer: null, templateExt: "" }));
+    setError("");
   };
+
+  const ext = form.templateExt || "";
+  const isDocx = ext === ".docx";
 
   return (
     <div>
-      <H2>Template do Documento</H2><Sub>Use seu modelo .docx ou gere com IA</Sub>
+      <H2>Papel Timbrado</H2><Sub>Use o papel timbrado de um documento existente ou gere sem timbrado</Sub>
       <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
-        {[{ id: "ai", label: "Gerar com IA", icon: "✦" }, { id: "template", label: "Meu template .docx", icon: "↑" }].map(m => (
+        {[{ id: "ai", label: "Sem timbrado", icon: "✦" }, { id: "template", label: "Usar meu timbrado", icon: "↑" }].map(m => (
           <button key={m.id} onClick={() => setForm(f => ({ ...f, templateMode: m.id }))}
             style={{ flex: 1, padding: "14px", borderRadius: "10px",
               border: `2px solid ${form.templateMode === m.id ? tk.accent : tk.border}`,
@@ -334,75 +421,51 @@ function StepTemplate({ form, setForm }) {
         <>
           {!form.templateFileName ? (
             <div onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
-              onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f?.name.endsWith(".docx")) parse(f); else setError("Envie um .docx"); }}
+              onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) parse(f); }}
               onClick={() => fileRef.current?.click()}
               style={{ border: `2px dashed ${dragOver ? tk.accent : tk.border}`, borderRadius: "12px", padding: "48px 24px",
                 textAlign: "center", cursor: "pointer", background: dragOver ? `${tk.accent}08` : "transparent" }}>
               <div style={{ fontSize: "36px", marginBottom: "12px", opacity: 0.6 }}>📄</div>
-              <div style={{ fontFamily: sans, fontSize: "15px", color: tk.text, fontWeight: 600, marginBottom: "6px" }}>Arraste seu template .docx aqui</div>
-              <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted }}>ou clique para selecionar</div>
-              <input ref={fileRef} type="file" accept=".docx" onChange={e => { if (e.target.files[0]) parse(e.target.files[0]); }} style={{ display: "none" }} />
+              <div style={{ fontFamily: sans, fontSize: "15px", color: tk.text, fontWeight: 600, marginBottom: "6px" }}>Arraste um documento com seu papel timbrado</div>
+              <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted }}>Aceita .docx, .doc ou .pdf — pode ser qualquer documento do escritório</div>
+              <input ref={fileRef} type="file" accept=".docx,.doc,.pdf" onChange={e => { if (e.target.files[0]) parse(e.target.files[0]); }} style={{ display: "none" }} />
             </div>
           ) : (
             <div style={{ background: tk.surface, borderRadius: "10px", border: `1px solid ${tk.accent}44`, padding: "16px 20px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{ fontSize: "20px" }}>📄</span>
+                  <span style={{ fontSize: "20px" }}>{ext === ".pdf" ? "📕" : "📄"}</span>
                   <div>
                     <div style={{ fontFamily: sans, fontSize: "14px", fontWeight: 600, color: tk.text }}>{form.templateFileName}</div>
-                    <div style={{ fontFamily: sans, fontSize: "12px", color: tk.success }}>✓ Carregado</div>
+                    <div style={{ fontFamily: sans, fontSize: "12px", color: tk.success }}>✓ Arquivo carregado</div>
                   </div>
                 </div>
                 <button onClick={remove} style={{ background: "none", border: "none", color: tk.danger, cursor: "pointer", fontSize: "18px" }}>✕</button>
               </div>
-              {vars.length > 0 && (
-                <div style={{ padding: "12px 16px", background: `${tk.accent}08`, borderRadius: "8px", border: `1px solid ${tk.accent}22`, marginBottom: "12px" }}>
-                  <div style={{ fontFamily: sans, fontSize: "12px", fontWeight: 700, color: tk.accent, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>
-                    Variáveis detectadas ({vars.length})
+              <div style={{ padding: "12px 16px", background: `${tk.accent}08`, borderRadius: "8px", border: `1px solid ${tk.accent}22` }}>
+                {isDocx ? (
+                  <div style={{ fontFamily: sans, fontSize: "12px", color: tk.textMuted, lineHeight: "1.6" }}>
+                    O cabeçalho, rodapé, logo e formatação serão preservados. O conteúdo será substituído pela nova procuração gerada por IA.
                   </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                    {vars.map(v => <span key={v} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px", fontFamily: "monospace", background: `${tk.accent}15`, color: tk.accentLight, border: `1px solid ${tk.accent}33` }}>{v}</span>)}
+                ) : (
+                  <div style={{ fontFamily: sans, fontSize: "12px", color: tk.textMuted, lineHeight: "1.6" }}>
+                    <span style={{ color: tk.accent, fontWeight: 600 }}>Formato {ext.toUpperCase().replace(".", "")}</span> — A procuração será gerada por IA normalmente. Para download com papel timbrado incorporado, use um arquivo .docx.
+                    Você ainda poderá copiar o texto ou salvar como PDF.
                   </div>
-                </div>
-              )}
-              {preview && (
-                <div>
-                  <div style={{ fontFamily: sans, fontSize: "12px", fontWeight: 700, color: tk.textMuted, textTransform: "uppercase", marginBottom: "6px" }}>Pré-visualização</div>
-                  <div style={{ padding: "12px", background: tk.bg, borderRadius: "8px", fontFamily: "Georgia, serif", fontSize: "13px", color: tk.textMuted, lineHeight: "1.6", maxHeight: "140px", overflowY: "auto", whiteSpace: "pre-wrap" }}>{preview}</div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
           {error && <div style={{ color: tk.danger, fontSize: "13px", marginTop: "8px" }}>{error}</div>}
-          <div style={{ marginTop: "20px" }}>
-            <div style={{ fontFamily: sans, fontSize: "13px", color: tk.accent, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
-              onClick={() => setForm(f => ({ ...f, showVarGuide: !f.showVarGuide }))}>
-              <span style={{ transform: form.showVarGuide ? "rotate(90deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▶</span>
-              Guia de variáveis
-            </div>
-            {form.showVarGuide && (
-              <div style={{ marginTop: "10px", padding: "16px", background: tk.surface, borderRadius: "8px", border: `1px solid ${tk.border}`, maxHeight: "220px", overflowY: "auto" }}>
-                <p style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted, marginTop: 0, marginBottom: "12px" }}>Insira estas variáveis no seu .docx:</p>
-                <div style={{ display: "grid", gap: "5px" }}>
-                  {VARIABLE_GUIDE.map(item => (
-                    <div key={item.v} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <code style={{ fontFamily: "monospace", fontSize: "11px", padding: "3px 8px", background: `${tk.accent}10`, color: tk.accentLight, borderRadius: "4px", border: `1px solid ${tk.accent}22`, whiteSpace: "nowrap", minWidth: "210px" }}>{item.v}</code>
-                      <span style={{ fontFamily: sans, fontSize: "12px", color: tk.textMuted }}>{item.d}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
         </>
       )}
 
       {form.templateMode === "ai" && (
         <div style={{ padding: "24px", borderRadius: "10px", border: `1px solid ${tk.border}`, background: tk.surface, textAlign: "center" }}>
           <div style={{ fontSize: "32px", marginBottom: "12px" }}>✦</div>
-          <div style={{ fontFamily: sans, fontSize: "15px", fontWeight: 600, color: tk.text, marginBottom: "6px" }}>Geração automática com IA</div>
+          <div style={{ fontFamily: sans, fontSize: "15px", fontWeight: 600, color: tk.text, marginBottom: "6px" }}>Geração sem timbrado</div>
           <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted, maxWidth: "360px", margin: "0 auto" }}>
-            A procuração será gerada do zero pela IA com formatação jurídica padrão.
+            A procuração será gerada pela IA em formato texto. Você pode copiar, salvar como PDF ou colar no seu modelo.
           </div>
         </div>
       )}
@@ -410,27 +473,70 @@ function StepTemplate({ form, setForm }) {
   );
 }
 
-// ─── Step 3: Outorgante ───
-function StepOutorgante({ form, setForm }) {
-  const s = (k, v) => setForm(f => ({ ...f, outorgante: { ...f.outorgante, [k]: v } }));
-  const o = form.outorgante;
+// ─── Step 3: Outorgantes (multiple) ───
+function StepOutorgantes({ form, setForm }) {
+  const outorgantes = form.outorgantes;
+
+  const update = (idx, key, val) => {
+    setForm(f => {
+      const updated = [...f.outorgantes];
+      updated[idx] = { ...updated[idx], [key]: val };
+      return { ...f, outorgantes: updated };
+    });
+  };
+
+  const add = () => setForm(f => ({ ...f, outorgantes: [...f.outorgantes, emptyOutorgante()] }));
+
+  const remove = (idx) => {
+    if (outorgantes.length <= 1) return;
+    setForm(f => ({ ...f, outorgantes: f.outorgantes.filter((_, i) => i !== idx) }));
+  };
+
   return (
     <div>
-      <H2>Dados do Outorgante</H2><Sub>Quem concede os poderes</Sub>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-        <div style={{ gridColumn: "1/-1" }}><Input label="Nome completo" value={o.nome} onChange={v => s("nome", v)} placeholder="Nome completo" required /></div>
-        <Input label="Nacionalidade" value={o.nacionalidade} onChange={v => s("nacionalidade", v)} placeholder="Brasileiro(a)" required />
-        <Select label="Estado Civil" value={o.estadoCivil} onChange={v => s("estadoCivil", v)} required options={[
-          { value: "", label: "Selecione..." }, { value: "solteiro(a)", label: "Solteiro(a)" },
-          { value: "casado(a)", label: "Casado(a)" }, { value: "divorciado(a)", label: "Divorciado(a)" },
-          { value: "viúvo(a)", label: "Viúvo(a)" }, { value: "união estável", label: "União Estável" },
-        ]} />
-        <Input label="Profissão" value={o.profissao} onChange={v => s("profissao", v)} placeholder="Profissão" required />
-        <MaskedInput label="CPF" value={o.cpf} onChange={v => s("cpf", v)} placeholder="000.000.000-00" required mask={maskCPF} />
-        <MaskedInput label="RG" value={o.rg} onChange={v => s("rg", v)} placeholder="00.000.000-0" required mask={maskRG} />
-        <Input label="Órgão Expedidor" value={o.orgaoExpedidor} onChange={v => s("orgaoExpedidor", v)} placeholder="SSP/SP" required />
-        <div style={{ gridColumn: "1/-1" }}><Input label="Endereço completo" value={o.endereco} onChange={v => s("endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required /></div>
-      </div>
+      <H2>Dados do{outorgantes.length > 1 ? "s" : ""} Outorgante{outorgantes.length > 1 ? "s" : ""}</H2>
+      <Sub>Quem concede os poderes</Sub>
+
+      {outorgantes.map((o, idx) => (
+        <div key={idx} style={{
+          padding: "20px", background: tk.surface, borderRadius: "10px",
+          border: `1px solid ${tk.border}`, marginBottom: "16px",
+        }}>
+          {outorgantes.length > 1 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ fontFamily: sans, fontSize: "14px", fontWeight: 700, color: tk.accent }}>
+                Outorgante {idx + 1}
+              </div>
+              <button onClick={() => remove(idx)}
+                style={{ background: "none", border: `1px solid ${tk.danger}44`, color: tk.danger,
+                  borderRadius: "6px", padding: "4px 12px", fontSize: "12px", fontFamily: sans,
+                  cursor: "pointer", fontWeight: 600 }}>
+                Remover
+              </button>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+            <div style={{ gridColumn: "1/-1" }}><Input label="Nome completo" value={o.nome} onChange={v => update(idx, "nome", v)} placeholder="Nome completo" required /></div>
+            <Input label="Nacionalidade" value={o.nacionalidade} onChange={v => update(idx, "nacionalidade", v)} placeholder="Brasileiro(a)" required />
+            <Select label="Estado Civil" value={o.estadoCivil} onChange={v => update(idx, "estadoCivil", v)} required options={[
+              { value: "", label: "Selecione..." }, { value: "solteiro(a)", label: "Solteiro(a)" },
+              { value: "casado(a)", label: "Casado(a)" }, { value: "divorciado(a)", label: "Divorciado(a)" },
+              { value: "viúvo(a)", label: "Viúvo(a)" }, { value: "união estável", label: "União Estável" },
+            ]} />
+            <Input label="Profissão" value={o.profissao} onChange={v => update(idx, "profissao", v)} placeholder="Profissão" required />
+            <MaskedInput label="CPF" value={o.cpf} onChange={v => update(idx, "cpf", v)} placeholder="000.000.000-00" required mask={maskCPF} />
+            <MaskedInput label="RG" value={o.rg} onChange={v => update(idx, "rg", v)} placeholder="00.000.000-0" required mask={maskRG} />
+            <Input label="Órgão Expedidor" value={o.orgaoExpedidor} onChange={v => update(idx, "orgaoExpedidor", v)} placeholder="SSP/SP" required />
+            <div style={{ gridColumn: "1/-1" }}><Input label="Endereço completo" value={o.endereco} onChange={v => update(idx, "endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required /></div>
+          </div>
+        </div>
+      ))}
+
+      <button onClick={add}
+        style={{ ...btnS, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+          borderStyle: "dashed", padding: "14px" }}>
+        + Adicionar outorgante
+      </button>
     </div>
   );
 }
@@ -488,9 +594,11 @@ function StepOutorgados({ form, setForm }) {
             <Input label="Profissão" value={o.profissao} onChange={v => update(idx, "profissao", v)} placeholder={isAdv ? "Advogado(a)" : "Profissão"} required />
             <MaskedInput label="CPF" value={o.cpf} onChange={v => update(idx, "cpf", v)} placeholder="000.000.000-00" required mask={maskCPF} />
             {isAdv && <MaskedInput label="OAB" value={o.oab} onChange={v => update(idx, "oab", v)} placeholder="OAB/SP 000.000" required mask={maskOAB} />}
-            <div style={{ gridColumn: "1/-1" }}>
-              <Input label="Endereço profissional" value={o.endereco} onChange={v => update(idx, "endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required />
-            </div>
+            {idx === 0 && (
+              <div style={{ gridColumn: "1/-1" }}>
+                <Input label="Endereço profissional" value={o.endereco} onChange={v => update(idx, "endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required />
+              </div>
+            )}
           </div>
         </div>
       ))}
@@ -550,7 +658,11 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
   const tipoLabel = TIPOS_PROCURACAO.find(x => x.id === form.tipo)?.label || form.tipo;
   const foro = form.foro || "";
 
-  const outorgadosSummary = form.outorgados.map((o, i) => {
+  const outorgantesSummary = form.outorgantes.map(o => {
+    return `${o.nome}, ${o.nacionalidade}, ${o.estadoCivil}, ${o.profissao}, CPF ${o.cpf}`;
+  }).join("\n");
+
+  const outorgadosSummary = form.outorgados.map(o => {
     let t = `${o.nome}, ${o.profissao}`;
     if (o.oab) t += `, OAB ${o.oab}`;
     t += `, CPF ${o.cpf}`;
@@ -559,8 +671,8 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
 
   const cards = [
     { t: "Tipo", c: tipoLabel },
-    { t: "Template", c: form.templateMode === "template" ? `📄 ${form.templateFileName}` : "✦ Gerado por IA" },
-    { t: "Outorgante", c: `${form.outorgante.nome}, ${form.outorgante.nacionalidade}, ${form.outorgante.estadoCivil}, ${form.outorgante.profissao}, CPF ${form.outorgante.cpf}` },
+    { t: "Timbrado", c: form.templateMode === "template" ? `📄 ${form.templateFileName}` : "Sem timbrado" },
+    { t: `Outorgante${form.outorgantes.length > 1 ? "s" : ""} (${form.outorgantes.length})`, c: outorgantesSummary },
     { t: `Outorgado${form.outorgados.length > 1 ? "s" : ""} (${form.outorgados.length})`, c: outorgadosSummary },
     { t: "Foro", c: foro },
   ];
@@ -582,9 +694,9 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
           style={{ ...btnP, width: "100%", opacity: loading ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}>
           {loading ? (
             <><span style={{ width: "18px", height: "18px", border: "2px solid transparent", borderTop: `2px solid ${tk.bg}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
-              {form.templateMode === "template" ? "Preenchendo template..." : "Gerando com IA..."}</>
+              Gerando procuração...</>
           ) : (
-            <>⚖ {form.templateMode === "template" ? "Preencher Template" : "Gerar Procuração"}</>
+            <>⚖ Gerar Procuração</>
           )}
         </button>
       )}
@@ -604,11 +716,11 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
             </button>
             <button onClick={onGerarPDF}
               style={{ ...btnP, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-              📄 Salvar PDF
+              📄 {form.templateMode === "template" && form.templateArrayBuffer ? "Salvar PDF com timbrado" : "Salvar PDF"}
             </button>
-            {form.templateMode === "template" && form.templateArrayBuffer && (
+            {form.templateMode === "template" && form.templateArrayBuffer && form.templateExt === ".docx" && (
               <button onClick={onGerarDocx} style={{ ...btnS, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", borderColor: tk.accent }}>
-                {docxReady ? "✓ Baixado!" : "📥 Baixar .docx"}
+                {docxReady ? "✓ Baixado!" : "📥 Baixar .docx com timbrado"}
               </button>
             )}
           </div>
@@ -629,9 +741,8 @@ export default function App() {
 
   const [form, setForm] = useState({
     tipo: "ad_judicia", templateMode: "ai",
-    templateFile: null, templateFileName: "", templateArrayBuffer: null,
-    templateVars: [], templateText: "", showVarGuide: false,
-    outorgante: { nome: "", nacionalidade: "brasileiro(a)", estadoCivil: "", profissao: "", cpf: "", rg: "", orgaoExpedidor: "", endereco: "" },
+    templateFile: null, templateFileName: "", templateArrayBuffer: null, templateExt: "",
+    outorgantes: [emptyOutorgante()],
     outorgados: [emptyOutorgado()],
     poderesSelecionados: [], poderesExtras: "", foro: "",
   });
@@ -651,19 +762,12 @@ export default function App() {
     const foro = form.foro || "";
     const poderes = [...(form.poderesSelecionados || []), ...(form.poderesExtras ? [form.poderesExtras] : [])].join(";\n");
 
-    if (form.templateMode === "template" && form.templateText) {
-      const map = buildVarMap(form);
-      let filled = form.templateText;
-      for (const [k, v] of Object.entries(map)) filled = filled.replaceAll(k, v || "[não informado]");
-      setResultado(filled); setLoading(false); return;
-    }
-
     try {
       const res = await fetch("/.netlify/functions/gerar-procuracao", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tipo: tipoLabel,
-          outorgante: form.outorgante,
+          outorgantes: form.outorgantes,
           outorgados: form.outorgados,
           poderes,
           foro,
@@ -682,34 +786,59 @@ export default function App() {
   };
 
   const gerarDocx = async () => {
-    if (!form.templateArrayBuffer) return;
+    if (!form.templateArrayBuffer || !resultado) return;
     try {
-      const map = buildVarMap(form);
       const zip = await JSZip.loadAsync(form.templateArrayBuffer);
-      const xmlFiles = Object.keys(zip.files).filter(n => n.startsWith("word/") && n.endsWith(".xml"));
-      for (const fn of xmlFiles) {
-        let content = await zip.file(fn).async("string");
-        for (const [key, val] of Object.entries(map)) {
-          const safe = (val || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-          content = content.replaceAll(key, safe);
-          const varName = key.replace(/[{}]/g, "");
-          const splitRe = new RegExp(
-            "\\{\\{(?:</w:t>[^]*?<w:t[^>]*>)?" + varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "(?:</w:t>[^]*?<w:t[^>]*>)?\\}\\}",
-            "g"
-          );
-          content = content.replace(splitRe, safe);
-        }
-        zip.file(fn, content);
+
+      // Read the document.xml (body content)
+      const docXml = await zip.file("word/document.xml").async("string");
+
+      // Find the <w:body> content and replace everything between the first <w:body> and </w:body>
+      // but PRESERVE the <w:sectPr> (section properties - margins, page size, header/footer refs)
+      const bodyMatch = docXml.match(/<w:body>([\s\S]*)<\/w:body>/);
+      if (!bodyMatch) {
+        alert("Erro: não foi possível localizar o corpo do documento.");
+        return;
       }
+
+      // Extract sectPr (section properties - contains header/footer references, margins, page size)
+      const sectPrMatch = bodyMatch[1].match(/<w:sectPr[\s\S]*<\/w:sectPr>/);
+      const sectPr = sectPrMatch ? sectPrMatch[0] : "";
+
+      // Convert AI-generated text into proper docx XML paragraphs
+      const lines = resultado.split("\n");
+      const paragraphs = lines.map(line => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>`;
+        }
+        // Check if line looks like a title/header (all caps or short centered text)
+        const isTitle = trimmed === trimmed.toUpperCase() && trimmed.length < 80 && trimmed.length > 3;
+        const rPr = isTitle
+          ? `<w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`
+          : `<w:rPr><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
+        const pPr = isTitle
+          ? `<w:pPr><w:jc w:val="center"/><w:spacing w:after="200"/></w:pPr>`
+          : `<w:pPr><w:jc w:val="both"/><w:spacing w:after="120" w:line="360" w:lineRule="auto"/></w:pPr>`;
+        const safeText = trimmed.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${safeText}</w:t></w:r></w:p>`;
+      }).join("");
+
+      // Build new body with AI content + preserved section properties
+      const newBody = `<w:body>${paragraphs}${sectPr}</w:body>`;
+      const newDocXml = docXml.replace(/<w:body>[\s\S]*<\/w:body>/, newBody);
+
+      zip.file("word/document.xml", newDocXml);
+
       const blob = await zip.generateAsync({ type: "blob" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `procuracao_${form.outorgante.nome.replace(/\s+/g, "_") || "preenchida"}.docx`;
+      a.href = url; a.download = `procuracao_${form.outorgantes[0]?.nome.replace(/\s+/g, "_") || "nova"}.docx`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url); setDocxReady(true);
     } catch (err) {
       console.error(err);
-      alert("Erro ao gerar o .docx.");
+      alert("Erro ao gerar o .docx: " + err.message);
     }
   };
 
@@ -717,10 +846,10 @@ export default function App() {
     switch (step) {
       case 0: return <StepTipo form={form} setForm={setForm} />;
       case 1: return <StepTemplate form={form} setForm={setForm} />;
-      case 2: return <StepOutorgante form={form} setForm={setForm} />;
+      case 2: return <StepOutorgantes form={form} setForm={setForm} />;
       case 3: return <StepOutorgados form={form} setForm={setForm} />;
       case 4: return <StepPoderes form={form} setForm={setForm} />;
-      case 5: return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} onGerarPDF={() => gerarPDF(resultado)} docxReady={docxReady} copied={copied} />;
+      case 5: return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} onGerarPDF={() => gerarPDF(resultado, form.templateMode === "template" ? form.templateArrayBuffer : null)} docxReady={docxReady} copied={copied} />;
       default: return null;
     }
   };
