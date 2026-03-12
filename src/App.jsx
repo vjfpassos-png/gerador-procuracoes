@@ -38,8 +38,6 @@ const PODERES_COMUNS = {
   ],
 };
 
-const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
-
 const VARIABLE_GUIDE = [
   { v: "{{NOME_OUTORGANTE}}", d: "Nome completo do outorgante" },
   { v: "{{NACIONALIDADE_OUTORGANTE}}", d: "Nacionalidade" },
@@ -49,12 +47,8 @@ const VARIABLE_GUIDE = [
   { v: "{{RG_OUTORGANTE}}", d: "RG do outorgante" },
   { v: "{{ORGAO_EXPEDIDOR}}", d: "Órgão expedidor do RG" },
   { v: "{{ENDERECO_OUTORGANTE}}", d: "Endereço completo" },
-  { v: "{{NOME_OUTORGADO}}", d: "Nome completo do outorgado" },
-  { v: "{{NACIONALIDADE_OUTORGADO}}", d: "Nacionalidade do outorgado" },
-  { v: "{{PROFISSAO_OUTORGADO}}", d: "Profissão do outorgado" },
-  { v: "{{CPF_OUTORGADO}}", d: "CPF do outorgado" },
-  { v: "{{OAB_OUTORGADO}}", d: "Número da OAB" },
-  { v: "{{ENDERECO_OUTORGADO}}", d: "Endereço do outorgado" },
+  { v: "{{OUTORGANTES}}", d: "Dados de todos os outorgantes" },
+  { v: "{{OUTORGADOS}}", d: "Dados de todos os outorgados" },
   { v: "{{PODERES}}", d: "Descrição dos poderes concedidos" },
   { v: "{{FORO}}", d: "Comarca / Foro eleito" },
   { v: "{{DATA}}", d: "Data por extenso" },
@@ -92,30 +86,69 @@ const btnS = {
 };
 
 // ─── Helpers ───
+const emptyOutorgante = () => ({ nome: "", nacionalidade: "brasileiro(a)", estadoCivil: "", profissao: "", cpf: "", rg: "", orgaoExpedidor: "", endereco: "" });
+const emptyOutorgado = () => ({ nome: "", nacionalidade: "brasileiro(a)", profissao: "", cpf: "", oab: "", endereco: "" });
+
 function buildVarMap(form) {
   const foro = form.foro || "";
   const poderes = [...(form.poderesSelecionados || []), ...(form.poderesExtras ? [form.poderesExtras] : [])].join("; ");
   const meses = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
   const now = new Date();
+  const outorgadosTexto = form.outorgados.map((o, i) => {
+    let t = `${o.nome}, ${o.nacionalidade}, ${o.profissao}, CPF ${o.cpf}`;
+    if (o.oab) t += `, OAB ${o.oab}`;
+    const end = i === 0 ? o.endereco : (o.endereco || form.outorgados[0].endereco);
+    if (end) t += `, com endereço profissional em ${end}`;
+    return t;
+  }).join("; e ");
+  const outorgantesTexto = form.outorgantes.map(o => {
+    return `${o.nome}, ${o.nacionalidade}, ${o.estadoCivil}, ${o.profissao}, CPF ${o.cpf}, RG ${o.rg} - ${o.orgaoExpedidor}, residente em ${o.endereco}`;
+  }).join("; e ");
+  const o1 = form.outorgantes[0] || {};
   return {
-    "{{NOME_OUTORGANTE}}": form.outorgante.nome,
-    "{{NACIONALIDADE_OUTORGANTE}}": form.outorgante.nacionalidade,
-    "{{ESTADO_CIVIL}}": form.outorgante.estadoCivil,
-    "{{PROFISSAO_OUTORGANTE}}": form.outorgante.profissao,
-    "{{CPF_OUTORGANTE}}": form.outorgante.cpf,
-    "{{RG_OUTORGANTE}}": form.outorgante.rg,
-    "{{ORGAO_EXPEDIDOR}}": form.outorgante.orgaoExpedidor,
-    "{{ENDERECO_OUTORGANTE}}": form.outorgante.endereco,
-    "{{NOME_OUTORGADO}}": form.outorgado.nome,
-    "{{NACIONALIDADE_OUTORGADO}}": form.outorgado.nacionalidade,
-    "{{PROFISSAO_OUTORGADO}}": form.outorgado.profissao,
-    "{{CPF_OUTORGADO}}": form.outorgado.cpf,
-    "{{OAB_OUTORGADO}}": form.outorgado.oab || "",
-    "{{ENDERECO_OUTORGADO}}": form.outorgado.endereco,
+    "{{NOME_OUTORGANTE}}": o1.nome || "",
+    "{{NACIONALIDADE_OUTORGANTE}}": o1.nacionalidade || "",
+    "{{ESTADO_CIVIL}}": o1.estadoCivil || "",
+    "{{PROFISSAO_OUTORGANTE}}": o1.profissao || "",
+    "{{CPF_OUTORGANTE}}": o1.cpf || "",
+    "{{RG_OUTORGANTE}}": o1.rg || "",
+    "{{ORGAO_EXPEDIDOR}}": o1.orgaoExpedidor || "",
+    "{{ENDERECO_OUTORGANTE}}": o1.endereco || "",
+    "{{OUTORGANTES}}": outorgantesTexto,
+    "{{OUTORGADOS}}": outorgadosTexto,
+    "{{NOME_OUTORGADO}}": form.outorgados[0]?.nome || "",
+    "{{NACIONALIDADE_OUTORGADO}}": form.outorgados[0]?.nacionalidade || "",
+    "{{PROFISSAO_OUTORGADO}}": form.outorgados[0]?.profissao || "",
+    "{{CPF_OUTORGADO}}": form.outorgados[0]?.cpf || "",
+    "{{OAB_OUTORGADO}}": form.outorgados[0]?.oab || "",
+    "{{ENDERECO_OUTORGADO}}": form.outorgados[0]?.endereco || "",
     "{{PODERES}}": poderes,
     "{{FORO}}": foro,
     "{{DATA}}": `${now.getDate()} de ${meses[now.getMonth()]} de ${now.getFullYear()}`,
   };
+}
+
+// ─── PDF Generator ───
+async function gerarPDF(texto) {
+  // Build a print-friendly HTML and use browser print
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 2.5cm 3cm; }
+  body { font-family: 'Times New Roman', Georgia, serif; font-size: 13pt; line-height: 1.8; color: #000; white-space: pre-wrap; }
+</style></head><body>${texto.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`;
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, "_blank");
+  if (w) {
+    w.onload = () => { w.print(); };
+  } else {
+    // Fallback: download as HTML
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "procuracao.html";
+    a.click();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 // ─── Mask Helpers ───
@@ -136,23 +169,11 @@ function maskRG(v) {
 }
 
 function maskOAB(v) {
-  // Formato: OAB/XX 000.000
   let clean = v.toUpperCase();
-  // Remove tudo que não é letra ou número
-  const letters = clean.replace(/[^A-Z]/g, "").slice(0, 5); // "OAB" + UF (2 letters)
-  const digits = clean.replace(/[^0-9]/g, "").slice(0, 6);
-  
-  // Try to extract parts
   const match = clean.match(/^(OAB)?[\/\s]*([A-Z]{0,2})[\/\s]*(\d{0,6})/);
-  if (!match) {
-    // Fallback: just format what we can
-    if (digits.length === 0) return clean.slice(0, 6);
-    return clean;
-  }
-  
+  if (!match) return clean.slice(0, 16);
   const uf = match[2] || "";
   const num = match[3] || "";
-  
   let result = "OAB";
   if (uf) result += `/${uf}`;
   if (num) {
@@ -164,15 +185,10 @@ function maskOAB(v) {
 
 function MaskedInput({ label, value, onChange, placeholder, required, mask }) {
   const [f, setF] = useState(false);
-  const handleChange = (e) => {
-    const raw = e.target.value;
-    const masked = mask ? mask(raw) : raw;
-    onChange(masked);
-  };
   return (
     <div style={{ marginBottom: "16px" }}>
       <label style={lbl}>{label}{required && <span style={{ color: tk.danger }}> *</span>}</label>
-      <input value={value} onChange={handleChange} placeholder={placeholder}
+      <input value={value} onChange={e => onChange(mask ? mask(e.target.value) : e.target.value)} placeholder={placeholder}
         onFocus={() => setF(true)} onBlur={() => setF(false)}
         style={{ ...inputBase, borderColor: f ? tk.borderFocus : tk.border, boxShadow: f ? `0 0 0 3px ${tk.accent}22` : "none" }} />
     </div>
@@ -243,19 +259,14 @@ function Steps({ current, total }) {
   );
 }
 
-function H2({ children }) {
-  return <h2 style={{ fontFamily: serif, fontSize: "28px", fontWeight: 600, color: tk.text, marginBottom: "8px" }}>{children}</h2>;
-}
-function Sub({ children }) {
-  return <p style={{ fontFamily: sans, fontSize: "14px", color: tk.textMuted, marginBottom: "28px" }}>{children}</p>;
-}
+function H2({ children }) { return <h2 style={{ fontFamily: serif, fontSize: "28px", fontWeight: 600, color: tk.text, marginBottom: "8px" }}>{children}</h2>; }
+function Sub({ children }) { return <p style={{ fontFamily: sans, fontSize: "14px", color: tk.textMuted, marginBottom: "28px" }}>{children}</p>; }
 
 // ─── Step 1: Tipo ───
 function StepTipo({ form, setForm }) {
   return (
     <div>
-      <H2>Tipo de Procuração</H2>
-      <Sub>Selecione o modelo adequado</Sub>
+      <H2>Tipo de Procuração</H2><Sub>Selecione o modelo adequado</Sub>
       <div style={{ display: "grid", gap: "12px" }}>
         {TIPOS_PROCURACAO.map(tipo => {
           const sel = form.tipo === tipo.id;
@@ -312,8 +323,7 @@ function StepTemplate({ form, setForm }) {
 
   return (
     <div>
-      <H2>Template do Documento</H2>
-      <Sub>Use seu modelo .docx ou gere com IA</Sub>
+      <H2>Template do Documento</H2><Sub>Use seu modelo .docx ou gere com IA</Sub>
       <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
         {[{ id: "ai", label: "Gerar com IA", icon: "✦" }, { id: "template", label: "Meu template .docx", icon: "↑" }].map(m => (
           <button key={m.id} onClick={() => setForm(f => ({ ...f, templateMode: m.id }))}
@@ -372,7 +382,6 @@ function StepTemplate({ form, setForm }) {
             </div>
           )}
           {error && <div style={{ color: tk.danger, fontSize: "13px", marginTop: "8px" }}>{error}</div>}
-
           <div style={{ marginTop: "20px" }}>
             <div style={{ fontFamily: sans, fontSize: "13px", color: tk.accent, cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
               onClick={() => setForm(f => ({ ...f, showVarGuide: !f.showVarGuide }))}>
@@ -381,9 +390,7 @@ function StepTemplate({ form, setForm }) {
             </div>
             {form.showVarGuide && (
               <div style={{ marginTop: "10px", padding: "16px", background: tk.surface, borderRadius: "8px", border: `1px solid ${tk.border}`, maxHeight: "220px", overflowY: "auto" }}>
-                <p style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted, marginTop: 0, marginBottom: "12px" }}>
-                  Insira estas variáveis no seu .docx. O sistema substituirá automaticamente:
-                </p>
+                <p style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted, marginTop: 0, marginBottom: "12px" }}>Insira estas variáveis no seu .docx:</p>
                 <div style={{ display: "grid", gap: "5px" }}>
                   {VARIABLE_GUIDE.map(item => (
                     <div key={item.v} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -411,47 +418,141 @@ function StepTemplate({ form, setForm }) {
   );
 }
 
-// ─── Step 3: Outorgante ───
-function StepOutorgante({ form, setForm }) {
-  const s = (k, v) => setForm(f => ({ ...f, outorgante: { ...f.outorgante, [k]: v } }));
-  const o = form.outorgante;
+// ─── Step 3: Outorgantes (multiple) ───
+function StepOutorgantes({ form, setForm }) {
+  const outorgantes = form.outorgantes;
+
+  const update = (idx, key, val) => {
+    setForm(f => {
+      const updated = [...f.outorgantes];
+      updated[idx] = { ...updated[idx], [key]: val };
+      return { ...f, outorgantes: updated };
+    });
+  };
+
+  const add = () => setForm(f => ({ ...f, outorgantes: [...f.outorgantes, emptyOutorgante()] }));
+
+  const remove = (idx) => {
+    if (outorgantes.length <= 1) return;
+    setForm(f => ({ ...f, outorgantes: f.outorgantes.filter((_, i) => i !== idx) }));
+  };
+
   return (
     <div>
-      <H2>Dados do Outorgante</H2><Sub>Quem concede os poderes</Sub>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-        <div style={{ gridColumn: "1/-1" }}><Input label="Nome completo" value={o.nome} onChange={v => s("nome", v)} placeholder="Nome completo" required /></div>
-        <Input label="Nacionalidade" value={o.nacionalidade} onChange={v => s("nacionalidade", v)} placeholder="Brasileiro(a)" required />
-        <Select label="Estado Civil" value={o.estadoCivil} onChange={v => s("estadoCivil", v)} required options={[
-          { value: "", label: "Selecione..." }, { value: "solteiro(a)", label: "Solteiro(a)" },
-          { value: "casado(a)", label: "Casado(a)" }, { value: "divorciado(a)", label: "Divorciado(a)" },
-          { value: "viúvo(a)", label: "Viúvo(a)" }, { value: "união estável", label: "União Estável" },
-        ]} />
-        <Input label="Profissão" value={o.profissao} onChange={v => s("profissao", v)} placeholder="Profissão" required />
-        <MaskedInput label="CPF" value={o.cpf} onChange={v => s("cpf", v)} placeholder="000.000.000-00" required mask={maskCPF} />
-        <MaskedInput label="RG" value={o.rg} onChange={v => s("rg", v)} placeholder="00.000.000-0" required mask={maskRG} />
-        <Input label="Órgão Expedidor" value={o.orgaoExpedidor} onChange={v => s("orgaoExpedidor", v)} placeholder="SSP/SP" required />
-        <div style={{ gridColumn: "1/-1" }}><Input label="Endereço completo" value={o.endereco} onChange={v => s("endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required /></div>
-      </div>
+      <H2>Dados do{outorgantes.length > 1 ? "s" : ""} Outorgante{outorgantes.length > 1 ? "s" : ""}</H2>
+      <Sub>Quem concede os poderes</Sub>
+
+      {outorgantes.map((o, idx) => (
+        <div key={idx} style={{
+          padding: "20px", background: tk.surface, borderRadius: "10px",
+          border: `1px solid ${tk.border}`, marginBottom: "16px",
+        }}>
+          {outorgantes.length > 1 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ fontFamily: sans, fontSize: "14px", fontWeight: 700, color: tk.accent }}>
+                Outorgante {idx + 1}
+              </div>
+              <button onClick={() => remove(idx)}
+                style={{ background: "none", border: `1px solid ${tk.danger}44`, color: tk.danger,
+                  borderRadius: "6px", padding: "4px 12px", fontSize: "12px", fontFamily: sans,
+                  cursor: "pointer", fontWeight: 600 }}>
+                Remover
+              </button>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+            <div style={{ gridColumn: "1/-1" }}><Input label="Nome completo" value={o.nome} onChange={v => update(idx, "nome", v)} placeholder="Nome completo" required /></div>
+            <Input label="Nacionalidade" value={o.nacionalidade} onChange={v => update(idx, "nacionalidade", v)} placeholder="Brasileiro(a)" required />
+            <Select label="Estado Civil" value={o.estadoCivil} onChange={v => update(idx, "estadoCivil", v)} required options={[
+              { value: "", label: "Selecione..." }, { value: "solteiro(a)", label: "Solteiro(a)" },
+              { value: "casado(a)", label: "Casado(a)" }, { value: "divorciado(a)", label: "Divorciado(a)" },
+              { value: "viúvo(a)", label: "Viúvo(a)" }, { value: "união estável", label: "União Estável" },
+            ]} />
+            <Input label="Profissão" value={o.profissao} onChange={v => update(idx, "profissao", v)} placeholder="Profissão" required />
+            <MaskedInput label="CPF" value={o.cpf} onChange={v => update(idx, "cpf", v)} placeholder="000.000.000-00" required mask={maskCPF} />
+            <MaskedInput label="RG" value={o.rg} onChange={v => update(idx, "rg", v)} placeholder="00.000.000-0" required mask={maskRG} />
+            <Input label="Órgão Expedidor" value={o.orgaoExpedidor} onChange={v => update(idx, "orgaoExpedidor", v)} placeholder="SSP/SP" required />
+            <div style={{ gridColumn: "1/-1" }}><Input label="Endereço completo" value={o.endereco} onChange={v => update(idx, "endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required /></div>
+          </div>
+        </div>
+      ))}
+
+      <button onClick={add}
+        style={{ ...btnS, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+          borderStyle: "dashed", padding: "14px" }}>
+        + Adicionar outorgante
+      </button>
     </div>
   );
 }
 
-// ─── Step 4: Outorgado ───
-function StepOutorgado({ form, setForm }) {
-  const s = (k, v) => setForm(f => ({ ...f, outorgado: { ...f.outorgado, [k]: v } }));
-  const o = form.outorgado;
+// ─── Step 4: Outorgados (multiple) ───
+function StepOutorgados({ form, setForm }) {
   const isAdv = form.tipo === "ad_judicia" || form.tipo === "ad_judicia_et_extra";
+  const outorgados = form.outorgados;
+
+  const update = (idx, key, val) => {
+    setForm(f => {
+      const updated = [...f.outorgados];
+      updated[idx] = { ...updated[idx], [key]: val };
+      return { ...f, outorgados: updated };
+    });
+  };
+
+  const addOutorgado = () => {
+    setForm(f => ({ ...f, outorgados: [...f.outorgados, emptyOutorgado()] }));
+  };
+
+  const removeOutorgado = (idx) => {
+    if (outorgados.length <= 1) return;
+    setForm(f => ({ ...f, outorgados: f.outorgados.filter((_, i) => i !== idx) }));
+  };
+
   return (
     <div>
-      <H2>Dados do Outorgado</H2><Sub>{isAdv ? "Advogado(a) que receberá os poderes" : "Quem receberá os poderes"}</Sub>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-        <div style={{ gridColumn: "1/-1" }}><Input label="Nome completo" value={o.nome} onChange={v => s("nome", v)} placeholder={isAdv ? "Nome do(a) advogado(a)" : "Nome completo"} required /></div>
-        <Input label="Nacionalidade" value={o.nacionalidade} onChange={v => s("nacionalidade", v)} placeholder="Brasileiro(a)" required />
-        <Input label="Profissão" value={o.profissao} onChange={v => s("profissao", v)} placeholder={isAdv ? "Advogado(a)" : "Profissão"} required />
-        <MaskedInput label="CPF" value={o.cpf} onChange={v => s("cpf", v)} placeholder="000.000.000-00" required mask={maskCPF} />
-        {isAdv && <MaskedInput label="OAB" value={o.oab} onChange={v => s("oab", v)} placeholder="OAB/SP 000.000" required mask={maskOAB} />}
-        <div style={{ gridColumn: "1/-1" }}><Input label="Endereço profissional" value={o.endereco} onChange={v => s("endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required /></div>
-      </div>
+      <H2>Dados do{outorgados.length > 1 ? "s" : ""} Outorgado{outorgados.length > 1 ? "s" : ""}</H2>
+      <Sub>{isAdv ? "Advogado(s) que receberá(ão) os poderes" : "Quem receberá os poderes"}</Sub>
+
+      {outorgados.map((o, idx) => (
+        <div key={idx} style={{
+          padding: "20px", background: tk.surface, borderRadius: "10px",
+          border: `1px solid ${tk.border}`, marginBottom: "16px",
+        }}>
+          {outorgados.length > 1 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ fontFamily: sans, fontSize: "14px", fontWeight: 700, color: tk.accent }}>
+                {isAdv ? `Advogado(a) ${idx + 1}` : `Outorgado ${idx + 1}`}
+              </div>
+              <button onClick={() => removeOutorgado(idx)}
+                style={{ background: "none", border: `1px solid ${tk.danger}44`, color: tk.danger,
+                  borderRadius: "6px", padding: "4px 12px", fontSize: "12px", fontFamily: sans,
+                  cursor: "pointer", fontWeight: 600 }}>
+                Remover
+              </button>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+            <div style={{ gridColumn: "1/-1" }}>
+              <Input label="Nome completo" value={o.nome} onChange={v => update(idx, "nome", v)} placeholder={isAdv ? "Nome do(a) advogado(a)" : "Nome completo"} required />
+            </div>
+            <Input label="Nacionalidade" value={o.nacionalidade} onChange={v => update(idx, "nacionalidade", v)} placeholder="Brasileiro(a)" required />
+            <Input label="Profissão" value={o.profissao} onChange={v => update(idx, "profissao", v)} placeholder={isAdv ? "Advogado(a)" : "Profissão"} required />
+            <MaskedInput label="CPF" value={o.cpf} onChange={v => update(idx, "cpf", v)} placeholder="000.000.000-00" required mask={maskCPF} />
+            {isAdv && <MaskedInput label="OAB" value={o.oab} onChange={v => update(idx, "oab", v)} placeholder="OAB/SP 000.000" required mask={maskOAB} />}
+            {idx === 0 && (
+              <div style={{ gridColumn: "1/-1" }}>
+                <Input label="Endereço profissional" value={o.endereco} onChange={v => update(idx, "endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required />
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+
+      <button onClick={addOutorgado}
+        style={{ ...btnS, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+          borderStyle: "dashed", padding: "14px" }}>
+        + Adicionar {isAdv ? "advogado(a)" : "outorgado"}
+      </button>
     </div>
   );
 }
@@ -498,15 +599,26 @@ function StepPoderes({ form, setForm }) {
 }
 
 // ─── Step 6: Revisão e Geração ───
-function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, docxReady }) {
+function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPDF, docxReady, copied }) {
   const tipoLabel = TIPOS_PROCURACAO.find(x => x.id === form.tipo)?.label || form.tipo;
   const foro = form.foro || "";
+
+  const outorgantesSummary = form.outorgantes.map(o => {
+    return `${o.nome}, ${o.nacionalidade}, ${o.estadoCivil}, ${o.profissao}, CPF ${o.cpf}`;
+  }).join("\n");
+
+  const outorgadosSummary = form.outorgados.map(o => {
+    let t = `${o.nome}, ${o.profissao}`;
+    if (o.oab) t += `, OAB ${o.oab}`;
+    t += `, CPF ${o.cpf}`;
+    return t;
+  }).join("\n");
 
   const cards = [
     { t: "Tipo", c: tipoLabel },
     { t: "Template", c: form.templateMode === "template" ? `📄 ${form.templateFileName}` : "✦ Gerado por IA" },
-    { t: "Outorgante", c: `${form.outorgante.nome}, ${form.outorgante.nacionalidade}, ${form.outorgante.estadoCivil}, ${form.outorgante.profissao}, CPF ${form.outorgante.cpf}` },
-    { t: "Outorgado", c: `${form.outorgado.nome}, ${form.outorgado.profissao}${form.outorgado.oab ? `, OAB ${form.outorgado.oab}` : ""}, CPF ${form.outorgado.cpf}` },
+    { t: `Outorgante${form.outorgantes.length > 1 ? "s" : ""} (${form.outorgantes.length})`, c: outorgantesSummary },
+    { t: `Outorgado${form.outorgados.length > 1 ? "s" : ""} (${form.outorgados.length})`, c: outorgadosSummary },
     { t: "Foro", c: foro },
   ];
 
@@ -517,7 +629,7 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, docxReady
         {cards.map((card, i) => (
           <div key={i} style={{ padding: "14px 18px", background: tk.surface, borderRadius: "8px", borderLeft: `3px solid ${tk.accent}` }}>
             <div style={{ fontSize: "11px", fontWeight: 700, color: tk.textMuted, textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: sans, marginBottom: "4px" }}>{card.t}</div>
-            <div style={{ fontSize: "14px", color: tk.text, fontFamily: sans, lineHeight: "1.5" }}>{card.c}</div>
+            <div style={{ fontSize: "14px", color: tk.text, fontFamily: sans, lineHeight: "1.5", whiteSpace: "pre-wrap" }}>{card.c}</div>
           </div>
         ))}
       </div>
@@ -543,10 +655,17 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, docxReady
             {resultado}
           </div>
           <div style={{ display: "flex", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
-            <button onClick={() => navigator.clipboard.writeText(resultado)} style={{ ...btnS, flex: 1 }}>📋 Copiar texto</button>
+            <button onClick={() => { navigator.clipboard.writeText(resultado); }}
+              style={{ ...btnS, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+              {copied ? "✓ Copiado!" : "📋 Copiar texto"}
+            </button>
+            <button onClick={onGerarPDF}
+              style={{ ...btnP, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+              📄 Salvar PDF
+            </button>
             {form.templateMode === "template" && form.templateArrayBuffer && (
-              <button onClick={onGerarDocx} style={{ ...btnP, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-                {docxReady ? "✓ Baixado!" : "📥 Baixar .docx preenchido"}
+              <button onClick={onGerarDocx} style={{ ...btnS, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", borderColor: tk.accent }}>
+                {docxReady ? "✓ Baixado!" : "📥 Baixar .docx"}
               </button>
             )}
           </div>
@@ -562,22 +681,29 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [resultado, setResultado] = useState("");
   const [docxReady, setDocxReady] = useState(false);
+  const [copied, setCopied] = useState(false);
   const ref = useRef(null);
 
   const [form, setForm] = useState({
     tipo: "ad_judicia", templateMode: "ai",
     templateFile: null, templateFileName: "", templateArrayBuffer: null,
     templateVars: [], templateText: "", showVarGuide: false,
-    outorgante: { nome: "", nacionalidade: "brasileiro(a)", estadoCivil: "", profissao: "", cpf: "", rg: "", orgaoExpedidor: "", endereco: "" },
-    outorgado: { nome: "", nacionalidade: "brasileiro(a)", profissao: "", cpf: "", oab: "", endereco: "" },
+    outorgantes: [emptyOutorgante()],
+    outorgados: [emptyOutorgado()],
     poderesSelecionados: [], poderesExtras: "", foro: "",
   });
 
   const N = 6;
   useEffect(() => { ref.current?.scrollTo({ top: 0, behavior: "smooth" }); }, [step]);
 
+  const handleCopy = () => {
+    navigator.clipboard.writeText(resultado);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const gerar = async () => {
-    setLoading(true); setResultado(""); setDocxReady(false);
+    setLoading(true); setResultado(""); setDocxReady(false); setCopied(false);
     const tipoLabel = TIPOS_PROCURACAO.find(x => x.id === form.tipo)?.label || form.tipo;
     const foro = form.foro || "";
     const poderes = [...(form.poderesSelecionados || []), ...(form.poderesExtras ? [form.poderesExtras] : [])].join(";\n");
@@ -594,15 +720,21 @@ export default function App() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tipo: tipoLabel,
-          outorgante: form.outorgante,
-          outorgado: form.outorgado,
+          outorgantes: form.outorgantes,
+          outorgados: form.outorgados,
           poderes,
           foro,
         }),
       });
       const data = await res.json();
-      setResultado(data.content?.map(b => b.text || "").join("\n") || "Erro ao gerar.");
-    } catch { setResultado("Erro ao conectar com a API."); }
+      if (data.error) {
+        setResultado("Erro da API: " + data.error);
+      } else if (data.content && data.content.length > 0) {
+        setResultado(data.content.map(b => b.text || "").join("\n"));
+      } else {
+        setResultado("Resposta inesperada: " + JSON.stringify(data).substring(0, 500));
+      }
+    } catch (err) { setResultado("Erro ao conectar: " + err.message); }
     setLoading(false);
   };
 
@@ -612,16 +744,12 @@ export default function App() {
       const map = buildVarMap(form);
       const zip = await JSZip.loadAsync(form.templateArrayBuffer);
       const xmlFiles = Object.keys(zip.files).filter(n => n.startsWith("word/") && n.endsWith(".xml"));
-
       for (const fn of xmlFiles) {
         let content = await zip.file(fn).async("string");
         for (const [key, val] of Object.entries(map)) {
           const safe = (val || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-          // Direct replacement
           content = content.replaceAll(key, safe);
-          // Handle variables split across XML tags by Word
           const varName = key.replace(/[{}]/g, "");
-          // Pattern: {{ may be in one <w:t>, variable name in another, }} in a third
           const splitRe = new RegExp(
             "\\{\\{(?:</w:t>[^]*?<w:t[^>]*>)?" + varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "(?:</w:t>[^]*?<w:t[^>]*>)?\\}\\}",
             "g"
@@ -630,16 +758,15 @@ export default function App() {
         }
         zip.file(fn, content);
       }
-
       const blob = await zip.generateAsync({ type: "blob" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `procuracao_${form.outorgante.nome.replace(/\s+/g, "_") || "preenchida"}.docx`;
+      a.href = url; a.download = `procuracao_${form.outorgantes[0]?.nome.replace(/\s+/g, "_") || "preenchida"}.docx`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url); setDocxReady(true);
     } catch (err) {
       console.error(err);
-      alert("Erro ao gerar o .docx. Verifique se o template é válido.");
+      alert("Erro ao gerar o .docx.");
     }
   };
 
@@ -647,10 +774,10 @@ export default function App() {
     switch (step) {
       case 0: return <StepTipo form={form} setForm={setForm} />;
       case 1: return <StepTemplate form={form} setForm={setForm} />;
-      case 2: return <StepOutorgante form={form} setForm={setForm} />;
-      case 3: return <StepOutorgado form={form} setForm={setForm} />;
+      case 2: return <StepOutorgantes form={form} setForm={setForm} />;
+      case 3: return <StepOutorgados form={form} setForm={setForm} />;
       case 4: return <StepPoderes form={form} setForm={setForm} />;
-      case 5: return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} docxReady={docxReady} />;
+      case 5: return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} onGerarPDF={() => gerarPDF(resultado)} docxReady={docxReady} copied={copied} />;
       default: return null;
     }
   };
@@ -685,7 +812,7 @@ export default function App() {
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", padding: "20px 32px",
           borderTop: `1px solid ${tk.border}`, background: `${tk.bg}88` }}>
-          <button onClick={() => { setStep(s => s - 1); if (step === 5) { setResultado(""); setDocxReady(false); } }}
+          <button onClick={() => { setStep(s => s - 1); if (step === 5) { setResultado(""); setDocxReady(false); setCopied(false); } }}
             disabled={step === 0} style={{ ...btnS, opacity: step === 0 ? 0.3 : 1, cursor: step === 0 ? "default" : "pointer" }}>← Voltar</button>
           {step < N - 1 && (
             <button onClick={() => setStep(s => s + 1)} style={btnP}
