@@ -133,43 +133,54 @@ async function extrairTimbrado(arrayBuffer) {
   try {
     const zip = await JSZip.loadAsync(arrayBuffer);
 
-    // Extract images from the docx (logos etc)
+    // Extract ALL images from the docx (logos etc)
     let logoBase64 = "";
     const mediaFiles = Object.keys(zip.files).filter(n => n.startsWith("word/media/"));
     if (mediaFiles.length > 0) {
-      // Get the first image (usually the logo)
       const imgFile = mediaFiles[0];
       const ext = imgFile.split(".").pop().toLowerCase();
-      const mimeMap = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", bmp: "image/bmp" };
+      const mimeMap = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", bmp: "image/bmp", emf: "image/emf", wmf: "image/wmf" };
       const mime = mimeMap[ext] || "image/png";
       const imgData = await zip.file(imgFile).async("base64");
       logoBase64 = `data:${mime};base64,${imgData}`;
     }
 
-    // Extract header text
+    // Extract header text - check all header files, use the one with most content
     let headerText = "";
+    let headerMaxLen = 0;
     const headerFiles = Object.keys(zip.files).filter(n => n.match(/word\/header\d*\.xml/));
     for (const hf of headerFiles) {
       const xml = await zip.file(hf).async("string");
-      // Extract text from <w:t> tags
-      const texts = [];
-      xml.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (_, t) => { texts.push(t); });
-      if (texts.length > 0) {
-        headerText = texts.join(" ").trim();
-        break; // Use first header with content
+      // Extract text per paragraph (each <w:p> is a line)
+      const lines = [];
+      xml.replace(/<w:p[^>]*>([\s\S]*?)<\/w:p>/g, (_, pContent) => {
+        const texts = [];
+        pContent.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (__, t) => { texts.push(t); });
+        if (texts.length > 0) lines.push(texts.join(""));
+      });
+      const joined = lines.join("\n").trim();
+      if (joined.length > headerMaxLen) {
+        headerMaxLen = joined.length;
+        headerText = joined;
       }
     }
 
-    // Extract footer text
+    // Extract footer text - same approach
     let footerText = "";
+    let footerMaxLen = 0;
     const footerFiles = Object.keys(zip.files).filter(n => n.match(/word\/footer\d*\.xml/));
     for (const ff of footerFiles) {
       const xml = await zip.file(ff).async("string");
-      const texts = [];
-      xml.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (_, t) => { texts.push(t); });
-      if (texts.length > 0) {
-        footerText = texts.join(" | ").trim();
-        break;
+      const lines = [];
+      xml.replace(/<w:p[^>]*>([\s\S]*?)<\/w:p>/g, (_, pContent) => {
+        const texts = [];
+        pContent.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (__, t) => { texts.push(t); });
+        if (texts.length > 0) lines.push(texts.join(""));
+      });
+      const joined = lines.join(" | ").trim();
+      if (joined.length > footerMaxLen) {
+        footerMaxLen = joined.length;
+        footerText = joined;
       }
     }
 
@@ -180,12 +191,12 @@ async function extrairTimbrado(arrayBuffer) {
   }
 }
 
-async function gerarPDF(texto, templateArrayBuffer) {
+async function gerarPDF(texto, templateArrayBuffer, templateExt) {
   let logo = "";
   let header = "";
   let footer = "";
 
-  if (templateArrayBuffer) {
+  if (templateArrayBuffer && templateExt === ".docx") {
     const timbrado = await extrairTimbrado(templateArrayBuffer);
     logo = timbrado.logoBase64;
     header = timbrado.headerText;
@@ -193,19 +204,19 @@ async function gerarPDF(texto, templateArrayBuffer) {
   }
 
   const safeTexto = texto.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const safeHeader = header.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const safeHeader = header.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
   const safeFooter = footer.replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
-  @page { size: A4; margin: 1.5cm 2.5cm 2cm 2.5cm; }
+  @page { size: A4; margin: ${(logo || header) ? "1cm" : "2cm"} 2.5cm 2cm 2.5cm; }
   @media print { .no-print { display: none; } }
   body { font-family: 'Times New Roman', Georgia, serif; font-size: 12pt; line-height: 1.7; color: #000; margin: 0; padding: 0; }
-  .letterhead { text-align: center; padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid #333; }
-  .letterhead img { max-height: 80px; max-width: 300px; margin-bottom: 8px; display: block; margin-left: auto; margin-right: auto; }
-  .letterhead .header-text { font-size: 10pt; color: #333; line-height: 1.5; }
+  .letterhead { text-align: center; padding: 10px 0 14px 0; margin-bottom: 20px; border-bottom: 2px solid #333; }
+  .letterhead img { max-height: 90px; max-width: 350px; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto; }
+  .letterhead .header-text { font-size: 9pt; color: #333; line-height: 1.6; }
   .content { white-space: pre-wrap; text-align: justify; }
-  .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 8pt; color: #666; padding: 10px 2.5cm; border-top: 1px solid #ccc; }
+  .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 8pt; color: #666; padding: 8px 2.5cm; border-top: 1px solid #ccc; }
 </style></head><body>
 ${(logo || header) ? `<div class="letterhead">
   ${logo ? `<img src="${logo}" alt="Logo" />` : ""}
@@ -786,15 +797,19 @@ export default function App() {
   };
 
   const gerarDocx = async () => {
-    if (!form.templateArrayBuffer || !resultado) return;
+    if (!form.templateArrayBuffer || !resultado || form.templateExt !== ".docx") return;
     try {
       const zip = await JSZip.loadAsync(form.templateArrayBuffer);
 
-      // Read the document.xml (body content)
-      const docXml = await zip.file("word/document.xml").async("string");
+      // Validate docx structure
+      const docFile = zip.file("word/document.xml");
+      if (!docFile) {
+        alert("Erro: o arquivo não parece ser um .docx válido. Verifique se o arquivo foi salvo no formato .docx (Word).");
+        return;
+      }
 
-      // Find the <w:body> content and replace everything between the first <w:body> and </w:body>
-      // but PRESERVE the <w:sectPr> (section properties - margins, page size, header/footer refs)
+      const docXml = await docFile.async("string");
+
       const bodyMatch = docXml.match(/<w:body>([\s\S]*)<\/w:body>/);
       if (!bodyMatch) {
         alert("Erro: não foi possível localizar o corpo do documento.");
@@ -812,19 +827,20 @@ export default function App() {
         if (!trimmed) {
           return `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>`;
         }
-        // Check if line looks like a title/header (all caps or short centered text)
-        const isTitle = trimmed === trimmed.toUpperCase() && trimmed.length < 80 && trimmed.length > 3;
+        const isTitle = trimmed === trimmed.toUpperCase() && trimmed.length < 80 && trimmed.length > 3 && !trimmed.startsWith("_");
+        const isSigLine = trimmed.startsWith("____");
         const rPr = isTitle
           ? `<w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`
           : `<w:rPr><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
         const pPr = isTitle
           ? `<w:pPr><w:jc w:val="center"/><w:spacing w:after="200"/></w:pPr>`
+          : isSigLine
+          ? `<w:pPr><w:jc w:val="center"/><w:spacing w:before="400" w:after="0"/></w:pPr>`
           : `<w:pPr><w:jc w:val="both"/><w:spacing w:after="120" w:line="360" w:lineRule="auto"/></w:pPr>`;
         const safeText = trimmed.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${safeText}</w:t></w:r></w:p>`;
       }).join("");
 
-      // Build new body with AI content + preserved section properties
       const newBody = `<w:body>${paragraphs}${sectPr}</w:body>`;
       const newDocXml = docXml.replace(/<w:body>[\s\S]*<\/w:body>/, newBody);
 
@@ -838,7 +854,7 @@ export default function App() {
       URL.revokeObjectURL(url); setDocxReady(true);
     } catch (err) {
       console.error(err);
-      alert("Erro ao gerar o .docx: " + err.message);
+      alert("Erro ao gerar o .docx. Verifique se o arquivo enviado é um .docx válido salvo pelo Word.");
     }
   };
 
@@ -849,7 +865,7 @@ export default function App() {
       case 2: return <StepOutorgantes form={form} setForm={setForm} />;
       case 3: return <StepOutorgados form={form} setForm={setForm} />;
       case 4: return <StepPoderes form={form} setForm={setForm} />;
-      case 5: return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} onGerarPDF={() => gerarPDF(resultado, form.templateMode === "template" ? form.templateArrayBuffer : null)} docxReady={docxReady} copied={copied} />;
+      case 5: return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} onGerarPDF={() => gerarPDF(resultado, form.templateMode === "template" ? form.templateArrayBuffer : null, form.templateExt)} docxReady={docxReady} copied={copied} />;
       default: return null;
     }
   };
