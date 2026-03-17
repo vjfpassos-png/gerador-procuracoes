@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import mammoth from "mammoth";
 import JSZip from "jszip";
+import { jsPDF } from "jspdf";
 
 // ─── Constants ───
 const TIPOS_PROCURACAO = [
@@ -128,27 +129,228 @@ function buildVarMap(form) {
   };
 }
 
-// ─── PDF Generator ───
-async function gerarPDF(texto) {
-  // Build a print-friendly HTML and use browser print
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>
-  @page { size: A4; margin: 2.5cm 3cm; }
-  body { font-family: 'Times New Roman', Georgia, serif; font-size: 13pt; line-height: 1.8; color: #000; white-space: pre-wrap; }
-</style></head><body>${texto.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`;
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, "_blank");
-  if (w) {
-    w.onload = () => { w.print(); };
-  } else {
-    // Fallback: download as HTML
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "procuracao.html";
-    a.click();
+// ─── Timbrado Extraction ───
+async function extrairTimbrado(arrayBuffer) {
+  try {
+    const zip = await JSZip.loadAsync(arrayBuffer);
+
+    // Extract logo image
+    let logoBase64 = "";
+    let logoFormat = "PNG";
+    const mediaFiles = Object.keys(zip.files).filter(n => n.startsWith("word/media/"));
+    // Prefer png/jpg, skip emf/wmf (not supported by jsPDF)
+    const supportedImg = mediaFiles.filter(n => /\.(png|jpg|jpeg|gif)$/i.test(n));
+    if (supportedImg.length > 0) {
+      const imgFile = supportedImg[0];
+      const ext = imgFile.split(".").pop().toLowerCase();
+      logoFormat = ext === "png" ? "PNG" : "JPEG";
+      const imgData = await zip.file(imgFile).async("base64");
+      logoBase64 = imgData;
+    }
+
+    // Extract header text (use the one with most content)
+    let headerLines = [];
+    let headerMaxLen = 0;
+    const headerFiles = Object.keys(zip.files).filter(n => n.match(/word\/header\d*\.xml/));
+    for (const hf of headerFiles) {
+      const xml = await zip.file(hf).async("string");
+      const lines = [];
+      xml.replace(/<w:p[^>]*>([\s\S]*?)<\/w:p>/g, (_, pContent) => {
+        const texts = [];
+        pContent.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (__, t) => { texts.push(t); });
+        if (texts.length > 0) lines.push(texts.join(""));
+      });
+      const totalLen = lines.join("").length;
+      if (totalLen > headerMaxLen) {
+        headerMaxLen = totalLen;
+        headerLines = lines;
+      }
+    }
+
+    // Extract footer text
+    let footerLines = [];
+    let footerMaxLen = 0;
+    const footerFiles = Object.keys(zip.files).filter(n => n.match(/word\/footer\d*\.xml/));
+    for (const ff of footerFiles) {
+      const xml = await zip.file(ff).async("string");
+      const lines = [];
+      xml.replace(/<w:p[^>]*>([\s\S]*?)<\/w:p>/g, (_, pContent) => {
+        const texts = [];
+        pContent.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (__, t) => { texts.push(t); });
+        if (texts.length > 0) lines.push(texts.join(""));
+      });
+      const totalLen = lines.join("").length;
+      if (totalLen > footerMaxLen) {
+        footerMaxLen = totalLen;
+        footerLines = lines;
+      }
+    }
+
+    return { logoBase64, logoFormat, headerLines, footerLines };
+  } catch (err) {
+    console.error("Erro ao extrair timbrado:", err);
+    return { logoBase64: "", logoFormat: "PNG", headerLines: [], footerLines: [] };
   }
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// ─── PDF Generator (direct download, no print dialog) ───
+async function gerarPDF(texto, templateArrayBuffer, fileName) {
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const pageW = 210;
+  const pageH = 297;
+  const marginL = 25;
+  const marginR = 25;
+  const contentW = pageW - marginL - marginR;
+  let y = 20;
+
+  let timbrado = { logoBase64: "", logoFormat: "PNG", headerLines: [], footerLines: [] };
+  if (templateArrayBuffer) {
+    timbrado = await extrairTimbrado(templateArrayBuffer);
+  }
+
+  const hasTimbrado = timbrado.logoBase64 || timbrado.headerLines.length > 0;
+  const hasFooter = timbrado.footerLines.length > 0;
+
+  // Function to add footer on each page
+  const addFooter = () => {
+    if (!hasFooter) return;
+    doc.setFontSize(7);
+    doc.setTextColor(120);
+    doc.setDrawColor(200);
+    doc.line(marginL, pageH - 15, pageW - marginR, pageH - 15);
+    const footerText = timbrado.footerLines.join("  |  ");
+    doc.text(footerText, pageW / 2, pageH - 10, { align: "center", maxWidth: contentW });
+  };
+
+  // Function to add header/logo on first page
+  const addHeader = () => {
+    if (!hasTimbrado) return;
+
+    // Logo
+    if (timbrado.logoBase64) {
+      try {
+        const imgData = "data:image/" + timbrado.logoFormat.toLowerCase() + ";base64," + timbrado.logoBase64;
+        // Estimate logo size (max 50mm wide, 20mm tall)
+        doc.addImage(imgData, timbrado.logoFormat, (pageW - 50) / 2, y, 50, 18);
+        y += 22;
+      } catch (e) {
+        console.warn("Não foi possível adicionar o logo:", e);
+      }
+    }
+
+    // Header text
+    if (timbrado.headerLines.length > 0) {
+      doc.setFontSize(8);
+      doc.setTextColor(80);
+      for (const line of timbrado.headerLines) {
+        doc.text(line, pageW / 2, y, { align: "center", maxWidth: contentW });
+        y += 3.5;
+      }
+      y += 2;
+    }
+
+    // Separator line
+    if (hasTimbrado) {
+      doc.setDrawColor(60);
+      doc.setLineWidth(0.4);
+      doc.line(marginL, y, pageW - marginR, y);
+      y += 8;
+    }
+  };
+
+  // Add header on first page
+  addHeader();
+
+  // Set font for content
+  doc.setFont("times", "normal");
+  doc.setFontSize(12);
+  doc.setTextColor(0);
+
+  const bottomLimit = hasFooter ? pageH - 25 : pageH - 20;
+
+  // Split text into lines and render
+  const paragraphs = texto.split("\n");
+  for (const para of paragraphs) {
+    const trimmed = para.trim();
+
+    if (!trimmed) {
+      y += 4;
+      if (y > bottomLimit) {
+        addFooter();
+        doc.addPage();
+        y = 20;
+      }
+      continue;
+    }
+
+    // Check if title (centered, bold)
+    const isTitle = trimmed === trimmed.toUpperCase() && trimmed.length < 80 && trimmed.length > 3 && !trimmed.startsWith("_");
+    const isSigLine = trimmed.startsWith("____");
+    const isLabel = /^(OUTORGANTE|OUTORGADOS?|PODERES):/.test(trimmed);
+
+    if (isTitle) {
+      doc.setFont("times", "bold");
+      doc.setFontSize(13);
+      const lines = doc.splitTextToSize(trimmed, contentW);
+      for (const line of lines) {
+        if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
+        doc.text(line, pageW / 2, y, { align: "center" });
+        y += 6;
+      }
+      y += 3;
+      doc.setFont("times", "normal");
+      doc.setFontSize(12);
+    } else if (isSigLine) {
+      y += 8;
+      if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
+      doc.text(trimmed, pageW / 2, y, { align: "center" });
+      y += 5;
+    } else {
+      // Regular paragraph - justify by splitting into lines
+      if (isLabel) {
+        // Bold the label part (OUTORGANTE: etc)
+        const colonIdx = trimmed.indexOf(":");
+        if (colonIdx > 0) {
+          const labelPart = trimmed.substring(0, colonIdx + 1);
+          const restPart = trimmed.substring(colonIdx + 1);
+          // Render as single block with label bold
+          const fullLines = doc.splitTextToSize(trimmed, contentW);
+          for (let li = 0; li < fullLines.length; li++) {
+            if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
+            // First line: bold the label
+            if (li === 0 && fullLines[0].startsWith(labelPart)) {
+              doc.setFont("times", "bold");
+              doc.text(labelPart, marginL, y);
+              const labelWidth = doc.getTextWidth(labelPart);
+              doc.setFont("times", "normal");
+              doc.text(fullLines[0].substring(labelPart.length), marginL + labelWidth, y);
+            } else {
+              doc.setFont("times", "normal");
+              doc.text(fullLines[li], marginL, y);
+            }
+            y += 5.5;
+          }
+          y += 3;
+          continue;
+        }
+      }
+
+      doc.setFont("times", "normal");
+      const lines = doc.splitTextToSize(trimmed, contentW);
+      for (const line of lines) {
+        if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
+        doc.text(line, marginL, y);
+        y += 5.5;
+      }
+      y += 3;
+    }
+  }
+
+  // Add footer on last page
+  addFooter();
+
+  // Download
+  doc.save(fileName);
 }
 
 // ─── Mask Helpers ───
@@ -299,7 +501,7 @@ function StepTemplate({ form, setForm }) {
   const [error, setError] = useState("");
   const fileRef = useRef(null);
 
-  const allowedExts = [".docx", ".doc", ".pdf"];
+  const allowedExts = [".docx"];
   const getExt = (name) => name ? "." + name.split(".").pop().toLowerCase() : "";
 
   const parse = async (file) => {
@@ -307,7 +509,7 @@ function StepTemplate({ form, setForm }) {
     setError("");
     const ext = getExt(file.name);
     if (!allowedExts.includes(ext)) {
-      setError("Formato não suportado. Envie um .docx, .doc ou .pdf");
+      setError("Formato não suportado. Envie um arquivo .docx (Word).");
       return;
     }
     const ab = await file.arrayBuffer();
@@ -319,8 +521,6 @@ function StepTemplate({ form, setForm }) {
     setError("");
   };
 
-  const ext = form.templateExt || "";
-  const isDocx = ext === ".docx";
 
   return (
     <div>
@@ -349,32 +549,25 @@ function StepTemplate({ form, setForm }) {
                 textAlign: "center", cursor: "pointer", background: dragOver ? `${tk.accent}08` : "transparent" }}>
               <div style={{ fontSize: "36px", marginBottom: "12px", opacity: 0.6 }}>📄</div>
               <div style={{ fontFamily: sans, fontSize: "15px", color: tk.text, fontWeight: 600, marginBottom: "6px" }}>Arraste um documento com seu papel timbrado</div>
-              <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted }}>Aceita .docx, .doc ou .pdf — pode ser qualquer documento do escritório</div>
-              <input ref={fileRef} type="file" accept=".docx,.doc,.pdf" onChange={e => { if (e.target.files[0]) parse(e.target.files[0]); }} style={{ display: "none" }} />
+              <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted }}>Pode ser qualquer documento .docx do escritório</div>
+              <input ref={fileRef} type="file" accept=".docx" onChange={e => { if (e.target.files[0]) parse(e.target.files[0]); }} style={{ display: "none" }} />
             </div>
           ) : (
             <div style={{ background: tk.surface, borderRadius: "10px", border: `1px solid ${tk.accent}44`, padding: "16px 20px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{ fontSize: "20px" }}>{ext === ".pdf" ? "📕" : "📄"}</span>
+                  <span style={{ fontSize: "20px" }}>📄</span>
                   <div>
                     <div style={{ fontFamily: sans, fontSize: "14px", fontWeight: 600, color: tk.text }}>{form.templateFileName}</div>
-                    <div style={{ fontFamily: sans, fontSize: "12px", color: tk.success }}>✓ Arquivo carregado</div>
+                    <div style={{ fontFamily: sans, fontSize: "12px", color: tk.success }}>✓ Papel timbrado carregado</div>
                   </div>
                 </div>
                 <button onClick={remove} style={{ background: "none", border: "none", color: tk.danger, cursor: "pointer", fontSize: "18px" }}>✕</button>
               </div>
               <div style={{ padding: "12px 16px", background: `${tk.accent}08`, borderRadius: "8px", border: `1px solid ${tk.accent}22` }}>
-                {isDocx ? (
-                  <div style={{ fontFamily: sans, fontSize: "12px", color: tk.textMuted, lineHeight: "1.6" }}>
-                    O cabeçalho, rodapé, logo e formatação serão preservados. O conteúdo será substituído pela nova procuração gerada por IA.
-                  </div>
-                ) : (
-                  <div style={{ fontFamily: sans, fontSize: "12px", color: tk.textMuted, lineHeight: "1.6" }}>
-                    <span style={{ color: tk.accent, fontWeight: 600 }}>Formato {ext.toUpperCase().replace(".", "")}</span> — A procuração será gerada por IA normalmente. Para download com papel timbrado incorporado, use um arquivo .docx.
-                    Você ainda poderá copiar o texto ou salvar como PDF.
-                  </div>
-                )}
+                <div style={{ fontFamily: sans, fontSize: "12px", color: tk.textMuted, lineHeight: "1.6" }}>
+                  O cabeçalho, rodapé, logo e formatação serão preservados. O conteúdo será substituído pela nova procuração gerada por IA.
+                </div>
               </div>
             </div>
           )}
@@ -616,9 +809,9 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
           style={{ ...btnP, width: "100%", opacity: loading ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}>
           {loading ? (
             <><span style={{ width: "18px", height: "18px", border: "2px solid transparent", borderTop: `2px solid ${tk.bg}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
-              {form.templateMode === "template" ? "Preenchendo template..." : "Gerando com IA..."}</>
+              Gerando procuração...</>
           ) : (
-            <>⚖ {form.templateMode === "template" ? "Preencher Template" : "Gerar Procuração"}</>
+            <>⚖ Gerar Procuração</>
           )}
         </button>
       )}
@@ -638,9 +831,9 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
             </button>
             <button onClick={onGerarPDF}
               style={{ ...btnP, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-              📄 Salvar PDF
+              📄 {form.templateMode === "template" && form.templateArrayBuffer ? "Salvar PDF com timbrado" : "Salvar PDF"}
             </button>
-            {form.templateMode === "template" && form.templateArrayBuffer && form.templateExt === ".docx" && (
+            {form.templateMode === "template" && form.templateArrayBuffer && (
               <button onClick={onGerarDocx} style={{ ...btnS, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", borderColor: tk.accent }}>
                 {docxReady ? "✓ Baixado!" : "📥 Baixar .docx com timbrado"}
               </button>
@@ -708,15 +901,19 @@ export default function App() {
   };
 
   const gerarDocx = async () => {
-    if (!form.templateArrayBuffer || !resultado) return;
+    if (!form.templateArrayBuffer || !resultado || form.templateExt !== ".docx") return;
     try {
       const zip = await JSZip.loadAsync(form.templateArrayBuffer);
 
-      // Read the document.xml (body content)
-      const docXml = await zip.file("word/document.xml").async("string");
+      // Validate docx structure
+      const docFile = zip.file("word/document.xml");
+      if (!docFile) {
+        alert("Erro: o arquivo não parece ser um .docx válido. Verifique se o arquivo foi salvo no formato .docx (Word).");
+        return;
+      }
 
-      // Find the <w:body> content and replace everything between the first <w:body> and </w:body>
-      // but PRESERVE the <w:sectPr> (section properties - margins, page size, header/footer refs)
+      const docXml = await docFile.async("string");
+
       const bodyMatch = docXml.match(/<w:body>([\s\S]*)<\/w:body>/);
       if (!bodyMatch) {
         alert("Erro: não foi possível localizar o corpo do documento.");
@@ -734,19 +931,20 @@ export default function App() {
         if (!trimmed) {
           return `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>`;
         }
-        // Check if line looks like a title/header (all caps or short centered text)
-        const isTitle = trimmed === trimmed.toUpperCase() && trimmed.length < 80 && trimmed.length > 3;
+        const isTitle = trimmed === trimmed.toUpperCase() && trimmed.length < 80 && trimmed.length > 3 && !trimmed.startsWith("_");
+        const isSigLine = trimmed.startsWith("____");
         const rPr = isTitle
           ? `<w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`
           : `<w:rPr><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
         const pPr = isTitle
           ? `<w:pPr><w:jc w:val="center"/><w:spacing w:after="200"/></w:pPr>`
+          : isSigLine
+          ? `<w:pPr><w:jc w:val="center"/><w:spacing w:before="400" w:after="0"/></w:pPr>`
           : `<w:pPr><w:jc w:val="both"/><w:spacing w:after="120" w:line="360" w:lineRule="auto"/></w:pPr>`;
         const safeText = trimmed.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${safeText}</w:t></w:r></w:p>`;
       }).join("");
 
-      // Build new body with AI content + preserved section properties
       const newBody = `<w:body>${paragraphs}${sectPr}</w:body>`;
       const newDocXml = docXml.replace(/<w:body>[\s\S]*<\/w:body>/, newBody);
 
@@ -760,7 +958,7 @@ export default function App() {
       URL.revokeObjectURL(url); setDocxReady(true);
     } catch (err) {
       console.error(err);
-      alert("Erro ao gerar o .docx: " + err.message);
+      alert("Erro ao gerar o .docx. Verifique se o arquivo enviado é um .docx válido salvo pelo Word.");
     }
   };
 
@@ -771,7 +969,12 @@ export default function App() {
       case 2: return <StepOutorgantes form={form} setForm={setForm} />;
       case 3: return <StepOutorgados form={form} setForm={setForm} />;
       case 4: return <StepPoderes form={form} setForm={setForm} />;
-      case 5: return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} onGerarPDF={() => gerarPDF(resultado)} docxReady={docxReady} copied={copied} />;
+      case 5: {
+        const pdfName = form.templateMode === "template" && form.templateArrayBuffer
+          ? `procuracao_${form.outorgantes[0]?.nome.replace(/\s+/g, "_") || "nova"}.pdf`
+          : `Gerador_Procuracoes.pdf`;
+        return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} onGerarPDF={() => gerarPDF(resultado, form.templateMode === "template" ? form.templateArrayBuffer : null, pdfName)} docxReady={docxReady} copied={copied} />;
+      }
       default: return null;
     }
   };
