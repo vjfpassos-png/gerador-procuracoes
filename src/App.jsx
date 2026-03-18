@@ -133,25 +133,57 @@ function buildVarMap(form) {
 async function extrairTimbrado(arrayBuffer) {
   try {
     const zip = await JSZip.loadAsync(arrayBuffer);
+    const files = Object.keys(zip.files);
 
-    // Extract logo image
-    let logoBase64 = "";
-    let logoFormat = "PNG";
-    const mediaFiles = Object.keys(zip.files).filter(n => n.startsWith("word/media/"));
-    // Prefer png/jpg, skip emf/wmf (not supported by jsPDF)
-    const supportedImg = mediaFiles.filter(n => /\.(png|jpg|jpeg|gif)$/i.test(n));
-    if (supportedImg.length > 0) {
-      const imgFile = supportedImg[0];
-      const ext = imgFile.split(".").pop().toLowerCase();
-      logoFormat = ext === "png" ? "PNG" : "JPEG";
-      const imgData = await zip.file(imgFile).async("base64");
-      logoBase64 = imgData;
+    // Helper: get image from a relationship file
+    const getImageFromRels = async (relsPath) => {
+      const relsFile = zip.file(relsPath);
+      if (!relsFile) return null;
+      const relsXml = await relsFile.async("string");
+      // Find image relationship
+      const match = relsXml.match(/Target="media\/([^"]+)"/);
+      if (!match) return null;
+      const imgPath = "word/media/" + match[1];
+      const imgFile = zip.file(imgPath);
+      if (!imgFile) return null;
+      const ext = match[1].split(".").pop().toLowerCase();
+      if (!["png", "jpg", "jpeg"].includes(ext)) return null;
+      const format = ext === "png" ? "PNG" : "JPEG";
+      const base64 = await imgFile.async("base64");
+      // Get dimensions
+      let width = 0, height = 0;
+      try {
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = `data:image/${ext};base64,${base64}`;
+        });
+        width = img.naturalWidth;
+        height = img.naturalHeight;
+      } catch {}
+      return { base64, format, width, height };
+    };
+
+    // Extract header image
+    let headerImg = null;
+    const headerRels = files.filter(f => f.match(/word\/_rels\/header\d*\.xml\.rels/));
+    for (const rel of headerRels) {
+      const img = await getImageFromRels(rel);
+      if (img) { headerImg = img; break; }
     }
 
-    // Extract header text (use the one with most content)
+    // Extract footer image
+    let footerImg = null;
+    const footerRels = files.filter(f => f.match(/word\/_rels\/footer\d*\.xml\.rels/));
+    for (const rel of footerRels) {
+      const img = await getImageFromRels(rel);
+      if (img) { footerImg = img; break; }
+    }
+
+    // Also try to extract text from headers/footers (fallback)
     let headerLines = [];
-    let headerMaxLen = 0;
-    const headerFiles = Object.keys(zip.files).filter(n => n.match(/word\/header\d*\.xml/));
+    const headerFiles = files.filter(n => n.match(/word\/header\d*\.xml$/));
     for (const hf of headerFiles) {
       const xml = await zip.file(hf).async("string");
       const lines = [];
@@ -160,17 +192,11 @@ async function extrairTimbrado(arrayBuffer) {
         pContent.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (__, t) => { texts.push(t); });
         if (texts.length > 0) lines.push(texts.join(""));
       });
-      const totalLen = lines.join("").length;
-      if (totalLen > headerMaxLen) {
-        headerMaxLen = totalLen;
-        headerLines = lines;
-      }
+      if (lines.join("").length > headerLines.join("").length) headerLines = lines;
     }
 
-    // Extract footer text
     let footerLines = [];
-    let footerMaxLen = 0;
-    const footerFiles = Object.keys(zip.files).filter(n => n.match(/word\/footer\d*\.xml/));
+    const footerFiles = files.filter(n => n.match(/word\/footer\d*\.xml$/));
     for (const ff of footerFiles) {
       const xml = await zip.file(ff).async("string");
       const lines = [];
@@ -179,17 +205,22 @@ async function extrairTimbrado(arrayBuffer) {
         pContent.replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, (__, t) => { texts.push(t); });
         if (texts.length > 0) lines.push(texts.join(""));
       });
-      const totalLen = lines.join("").length;
-      if (totalLen > footerMaxLen) {
-        footerMaxLen = totalLen;
-        footerLines = lines;
-      }
+      if (lines.join("").length > footerLines.join("").length) footerLines = lines;
     }
 
-    return { logoBase64, logoFormat, headerLines, footerLines };
+    console.log("Timbrado extraído:", {
+      hasHeaderImg: !!headerImg,
+      headerImgSize: headerImg ? `${headerImg.width}x${headerImg.height}` : "none",
+      hasFooterImg: !!footerImg,
+      footerImgSize: footerImg ? `${footerImg.width}x${footerImg.height}` : "none",
+      headerLines,
+      footerLines,
+    });
+
+    return { headerImg, footerImg, headerLines, footerLines };
   } catch (err) {
     console.error("Erro ao extrair timbrado:", err);
-    return { logoBase64: "", logoFormat: "PNG", headerLines: [], footerLines: [] };
+    return { headerImg: null, footerImg: null, headerLines: [], footerLines: [] };
   }
 }
 
@@ -201,140 +232,143 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
   const marginL = 25;
   const marginR = 25;
   const contentW = pageW - marginL - marginR;
-  let y = 20;
+  let y = 12;
 
-  let timbrado = { logoBase64: "", logoFormat: "PNG", headerLines: [], footerLines: [] };
+  let timbrado = { headerImg: null, footerImg: null, headerLines: [], footerLines: [] };
   if (templateArrayBuffer) {
     timbrado = await extrairTimbrado(templateArrayBuffer);
   }
 
-  const hasTimbrado = timbrado.logoBase64 || timbrado.headerLines.length > 0;
-  const hasFooter = timbrado.footerLines.length > 0;
+  const hasHeader = timbrado.headerImg || timbrado.headerLines.length > 0;
+  const hasFooter = timbrado.footerImg || timbrado.footerLines.length > 0;
 
-  // Function to add footer on each page
-  const addFooter = () => {
-    if (!hasFooter) return;
-    doc.setFontSize(7);
-    doc.setTextColor(120);
-    doc.setDrawColor(200);
-    doc.line(marginL, pageH - 15, pageW - marginR, pageH - 15);
-    const footerText = timbrado.footerLines.join("  |  ");
-    doc.text(footerText, pageW / 2, pageH - 10, { align: "center", maxWidth: contentW });
+  // Helper: add image proportionally
+  const addImgProportional = (img, xStart, maxW, maxH, yPos) => {
+    const ratio = img.width / img.height;
+    let w = maxW;
+    let h = w / ratio;
+    if (h > maxH) { h = maxH; w = h * ratio; }
+    const imgData = "data:image/" + img.format.toLowerCase() + ";base64," + img.base64;
+    const imgX = xStart + (maxW - w) / 2;
+    doc.addImage(imgData, img.format, imgX, yPos, w, h);
+    return h;
   };
 
-  // Function to add header/logo on first page
-  const addHeader = () => {
-    if (!hasTimbrado) return;
-
-    // Logo
-    if (timbrado.logoBase64) {
+  // Add footer on a page
+  const addFooter = () => {
+    if (!hasFooter) return;
+    if (timbrado.footerImg) {
       try {
-        const imgData = "data:image/" + timbrado.logoFormat.toLowerCase() + ";base64," + timbrado.logoBase64;
-        // Estimate logo size (max 50mm wide, 20mm tall)
-        doc.addImage(imgData, timbrado.logoFormat, (pageW - 50) / 2, y, 50, 18);
-        y += 22;
-      } catch (e) {
-        console.warn("Não foi possível adicionar o logo:", e);
+        const maxH = 12;
+        const fY = pageH - maxH - 5;
+        addImgProportional(timbrado.footerImg, marginL, contentW, maxH, fY);
+      } catch (e) { console.warn("Footer image error:", e); }
+    } else if (timbrado.footerLines.length > 0) {
+      doc.setFontSize(7);
+      doc.setTextColor(100);
+      doc.setDrawColor(180);
+      doc.line(marginL, pageH - 18, pageW - marginR, pageH - 18);
+      let fy = pageH - 14;
+      for (const line of timbrado.footerLines) {
+        doc.text(line, pageW / 2, fy, { align: "center", maxWidth: contentW });
+        fy += 3;
       }
-    }
-
-    // Header text
-    if (timbrado.headerLines.length > 0) {
-      doc.setFontSize(8);
-      doc.setTextColor(80);
-      for (const line of timbrado.headerLines) {
-        doc.text(line, pageW / 2, y, { align: "center", maxWidth: contentW });
-        y += 3.5;
-      }
-      y += 2;
-    }
-
-    // Separator line
-    if (hasTimbrado) {
-      doc.setDrawColor(60);
-      doc.setLineWidth(0.4);
-      doc.line(marginL, y, pageW - marginR, y);
-      y += 8;
     }
   };
 
   // Add header on first page
+  const addHeader = () => {
+    if (!hasHeader) return;
+    if (timbrado.headerImg) {
+      try {
+        const h = addImgProportional(timbrado.headerImg, marginL, contentW, 25, y);
+        y += h + 3;
+      } catch (e) { console.warn("Header image error:", e); }
+    }
+    if (timbrado.headerLines.length > 0) {
+      doc.setFontSize(8);
+      doc.setTextColor(60);
+      for (const line of timbrado.headerLines) {
+        doc.text(line, pageW / 2, y, { align: "center", maxWidth: contentW });
+        y += 3.5;
+      }
+      y += 1;
+    }
+    doc.setDrawColor(40);
+    doc.setLineWidth(0.5);
+    doc.line(marginL, y, pageW - marginR, y);
+    y += 10;
+  };
+
   addHeader();
 
-  // Set font for content
   doc.setFont("times", "normal");
   doc.setFontSize(12);
   doc.setTextColor(0);
 
-  const bottomLimit = hasFooter ? pageH - 25 : pageH - 20;
+  const bottomLimit = hasFooter ? pageH - 22 : pageH - 20;
 
-  // Split text into lines and render
   const paragraphs = texto.split("\n");
   for (const para of paragraphs) {
     const trimmed = para.trim();
-
     if (!trimmed) {
       y += 4;
-      if (y > bottomLimit) {
-        addFooter();
-        doc.addPage();
-        y = 20;
-      }
+      if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
       continue;
     }
 
-    // Check if title (centered, bold)
-    const isTitle = trimmed === trimmed.toUpperCase() && trimmed.length < 80 && trimmed.length > 3 && !trimmed.startsWith("_");
+    const isTitle = /^PROCURA[C\u00C7][A\u00C3]O/.test(trimmed);
     const isSigLine = trimmed.startsWith("____");
-    const isLabel = /^(OUTORGANTE|OUTORGADOS?|PODERES):/.test(trimmed);
+    const isSigName = /^OUTORGANTE:/.test(trimmed) && trimmed.length < 60 && !trimmed.includes("portador");
+    const isLabel = /^(OUTORGANTE|OUTORGADOS?|PODERES):/.test(trimmed) && !isSigName;
 
     if (isTitle) {
+      y += 4;
       doc.setFont("times", "bold");
-      doc.setFontSize(13);
+      doc.setFontSize(14);
       const lines = doc.splitTextToSize(trimmed, contentW);
       for (const line of lines) {
         if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
         doc.text(line, pageW / 2, y, { align: "center" });
-        y += 6;
+        y += 7;
       }
-      y += 3;
+      y += 6;
       doc.setFont("times", "normal");
       doc.setFontSize(12);
     } else if (isSigLine) {
-      y += 8;
+      y += 10;
       if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
       doc.text(trimmed, pageW / 2, y, { align: "center" });
       y += 5;
-    } else {
-      // Regular paragraph - justify by splitting into lines
-      if (isLabel) {
-        // Bold the label part (OUTORGANTE: etc)
-        const colonIdx = trimmed.indexOf(":");
-        if (colonIdx > 0) {
-          const labelPart = trimmed.substring(0, colonIdx + 1);
-          const restPart = trimmed.substring(colonIdx + 1);
-          // Render as single block with label bold
-          const fullLines = doc.splitTextToSize(trimmed, contentW);
-          for (let li = 0; li < fullLines.length; li++) {
-            if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
-            // First line: bold the label
-            if (li === 0 && fullLines[0].startsWith(labelPart)) {
-              doc.setFont("times", "bold");
-              doc.text(labelPart, marginL, y);
-              const labelWidth = doc.getTextWidth(labelPart);
-              doc.setFont("times", "normal");
-              doc.text(fullLines[0].substring(labelPart.length), marginL + labelWidth, y);
-            } else {
-              doc.setFont("times", "normal");
-              doc.text(fullLines[li], marginL, y);
-            }
-            y += 5.5;
+    } else if (isSigName) {
+      if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
+      doc.setFont("times", "bold");
+      doc.text(trimmed, pageW / 2, y, { align: "center" });
+      doc.setFont("times", "normal");
+      y += 8;
+    } else if (isLabel) {
+      const colonIdx = trimmed.indexOf(":");
+      if (colonIdx > 0) {
+        const labelPart = trimmed.substring(0, colonIdx + 1);
+        const fullLines = doc.splitTextToSize(trimmed, contentW);
+        for (let li = 0; li < fullLines.length; li++) {
+          if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
+          if (li === 0 && fullLines[0].startsWith(labelPart)) {
+            doc.setFont("times", "bold");
+            doc.text(labelPart, marginL, y);
+            const labelW = doc.getTextWidth(labelPart);
+            doc.setFont("times", "normal");
+            doc.text(fullLines[0].substring(labelPart.length), marginL + labelW, y);
+          } else {
+            doc.setFont("times", "normal");
+            doc.text(fullLines[li], marginL, y);
           }
-          y += 3;
-          continue;
+          y += 5.5;
         }
+        y += 4;
+        continue;
       }
-
+    } else {
       doc.setFont("times", "normal");
       const lines = doc.splitTextToSize(trimmed, contentW);
       for (const line of lines) {
@@ -346,12 +380,10 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
     }
   }
 
-  // Add footer on last page
   addFooter();
-
-  // Download
   doc.save(fileName);
 }
+
 
 // ─── Mask Helpers ───
 function maskCPF(v) {
