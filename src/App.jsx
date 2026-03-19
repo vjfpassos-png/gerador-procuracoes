@@ -560,15 +560,15 @@ function EnderecoFields({ prefix, data, onUpdate }) {
   };
 
   return (
-    <div style={{ gridColumn: "1/-1" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+    <div className="full">
+      <div className="form-grid">
         <div style={{ position: "relative" }}>
           <MaskedInput label="CEP" value={data.cep || ""} onChange={handleCEP} placeholder="00000-000" required mask={null} />
           {loading && <div style={{ position: "absolute", right: "12px", top: "32px", fontSize: "12px", color: tk.accent }}>Buscando...</div>}
           {cepOk && <div style={{ position: "absolute", right: "12px", top: "32px", fontSize: "12px", color: tk.success }}>✓</div>}
         </div>
         <Input label="UF" value={data.uf || ""} onChange={v => onUpdate("uf", v)} placeholder="SP" required />
-        <div style={{ gridColumn: "1/-1" }}><Input label="Rua" value={data.rua || ""} onChange={v => onUpdate("rua", v)} placeholder="Rua / Avenida" required /></div>
+        <div className="full"><Input label="Rua" value={data.rua || ""} onChange={v => onUpdate("rua", v)} placeholder="Rua / Avenida" required /></div>
         <Input label="Número" value={data.numero || ""} onChange={v => onUpdate("numero", v)} placeholder="Nº" required />
         <Input label="Complemento" value={data.complemento || ""} onChange={v => onUpdate("complemento", v)} placeholder="Apto, sala (opcional)" />
         <Input label="Bairro" value={data.bairro || ""} onChange={v => onUpdate("bairro", v)} placeholder="Bairro" required />
@@ -706,7 +706,7 @@ function StepTemplate({ form, setForm }) {
   return (
     <div>
       <H2>Papel Timbrado</H2><Sub>Use o papel timbrado de um documento existente ou gere sem timbrado</Sub>
-      <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
+      <div className="mode-toggle">
         {[{ id: "ai", label: "Sem timbrado", icon: "✦" }, { id: "template", label: "Usar meu timbrado", icon: "↑" }].map(m => (
           <button key={m.id} onClick={() => setForm(f => ({ ...f, templateMode: m.id }))}
             style={{ flex: 1, padding: "14px", borderRadius: "10px",
@@ -812,8 +812,8 @@ function StepOutorgantes({ form, setForm }) {
               </button>
             </div>
           )}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-            <div style={{ gridColumn: "1/-1" }}><Input label="Nome completo" value={o.nome} onChange={v => update(idx, "nome", v)} placeholder="Nome completo" required /></div>
+          <div className="form-grid">
+            <div className="full"><Input label="Nome completo" value={o.nome} onChange={v => update(idx, "nome", v)} placeholder="Nome completo" required /></div>
             <Input label="Nacionalidade" value={o.nacionalidade} onChange={v => update(idx, "nacionalidade", v)} placeholder="Brasileiro(a)" required />
             <Select label="Estado Civil" value={o.estadoCivil} onChange={v => update(idx, "estadoCivil", v)} required options={[
               { value: "", label: "Selecione..." }, { value: "solteiro(a)", label: "Solteiro(a)" },
@@ -883,8 +883,8 @@ function StepOutorgados({ form, setForm }) {
               </button>
             </div>
           )}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-            <div style={{ gridColumn: "1/-1" }}>
+          <div className="form-grid">
+            <div className="full">
               <Input label="Nome completo" value={o.nome} onChange={v => update(idx, "nome", v)} placeholder={isAdv ? "Nome do(a) advogado(a)" : "Nome completo"} required />
             </div>
             <Input label="Nacionalidade" value={o.nacionalidade} onChange={v => update(idx, "nacionalidade", v)} placeholder="Brasileiro(a)" required />
@@ -1004,7 +1004,7 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
             whiteSpace: "pre-wrap", maxHeight: "420px", overflowY: "auto", textAlign: "justify" }}>
             {resultado}
           </div>
-          <div style={{ display: "flex", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
+          <div className="action-buttons">
             <button onClick={onCopy}
               style={{ ...btnS, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
               {copied ? "✓ Copiado!" : "📋 Copiar texto"}
@@ -1162,7 +1162,7 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: tk.bg, fontFamily: sans, color: tk.text,
-      display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 20px" }}>
+      display: "flex", flexDirection: "column", alignItems: "center", padding: "clamp(20px, 4vw, 40px) 16px" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -1172,10 +1172,28 @@ export default function App() {
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: ${tk.border}; border-radius: 3px; }
         select option { background: ${tk.surface}; color: ${tk.text}; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+        .form-grid .full { grid-column: 1 / -1; }
+        .action-buttons { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+        .action-buttons button { flex: 1; min-width: 140px; }
+        .mode-toggle { display: flex; gap: 8px; margin-bottom: 24px; }
+        .step-nav { display: flex; justify-content: space-between; padding: 20px 32px; }
+        .card-content { padding: 0 32px 28px; }
+        .card-header { padding: 28px 32px 0; }
+        @media (max-width: 600px) {
+          .form-grid { grid-template-columns: 1fr !important; }
+          .form-grid .full { grid-column: 1 !important; }
+          .action-buttons { flex-direction: column; }
+          .action-buttons button { min-width: 100% !important; }
+          .mode-toggle { flex-direction: column; }
+          .step-nav { padding: 16px 20px; }
+          .card-content { padding: 0 20px 20px; }
+          .card-header { padding: 20px 20px 0; }
+        }
       `}</style>
 
       <div style={{ textAlign: "center", marginBottom: "36px" }}>
-        <h1 style={{ fontFamily: serif, fontSize: "32px", fontWeight: 700, color: tk.accent, margin: 0, lineHeight: 1.2 }}>Gerador de Procurações</h1>
+        <h1 style={{ fontFamily: serif, fontSize: "clamp(24px, 5vw, 32px)", fontWeight: 700, color: tk.accent, margin: 0, lineHeight: 1.2 }}>Gerador de Procurações</h1>
         <p style={{ fontFamily: sans, fontSize: "14px", color: tk.textMuted, marginTop: "8px", maxWidth: "380px", margin: "8px auto 0" }}>
           Gere procurações em segundos
         </p>
@@ -1183,11 +1201,11 @@ export default function App() {
 
       <div style={{ width: "100%", maxWidth: "660px", background: tk.surface,
         borderRadius: "12px", border: `1px solid ${tk.border}`, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-        <div style={{ padding: "28px 32px 0" }}><Steps current={step} total={N} /></div>
-        <div ref={ref} style={{ padding: "0 32px 28px", maxHeight: "60vh", overflowY: "auto", animation: "fadeIn 0.3s ease" }}>
+        <div className="card-header"><Steps current={step} total={N} /></div>
+        <div ref={ref} className="card-content" style={{ maxHeight: "60vh", overflowY: "auto", animation: "fadeIn 0.3s ease" }}>
           {stepView()}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", padding: "20px 32px",
+        <div className="step-nav" style={{
           borderTop: `1px solid ${tk.border}`, background: tk.surface }}>
           <button onClick={() => { setStep(s => s - 1); if (step === 5) { setResultado(""); setDocxReady(false); setCopied(false); setPdfSaved(false); } }}
             disabled={step === 0} style={{ ...btnS, opacity: step === 0 ? 0.3 : 1, cursor: step === 0 ? "default" : "pointer" }}>← Voltar</button>
