@@ -57,13 +57,14 @@ const VARIABLE_GUIDE = [
 
 // ─── Design Tokens ───
 const tk = {
-  bg: "#0C0F14", surface: "#151921", border: "#252D3A", borderFocus: "#C9A96E",
-  accent: "#C9A96E", accentDark: "#A8863A", accentLight: "#E8D5A8",
-  text: "#E8E6E1", textMuted: "#8A8F9C", textDim: "#5A5F6C",
-  danger: "#D4645C", success: "#6BAF7B",
+  bg: "#F7F8FA", surface: "#FFFFFF", border: "#D8DCE3", borderFocus: "#1B3A5C",
+  accent: "#1B3A5C", accentDark: "#122845", accentLight: "#2E5A8A",
+  gold: "#B8924A", goldLight: "#D4AF6E",
+  text: "#1A1E2A", textMuted: "#5A6175", textDim: "#8B90A0",
+  danger: "#C0392B", success: "#27804A",
 };
-const serif = "'Cormorant Garamond', Georgia, serif";
-const sans = "'DM Sans', 'Helvetica Neue', sans-serif";
+const serif = "'Merriweather', Georgia, serif";
+const sans = "'Inter', 'Helvetica Neue', sans-serif";
 
 const inputBase = {
   width: "100%", padding: "12px 16px", background: tk.surface,
@@ -76,9 +77,9 @@ const lbl = {
   marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: sans,
 };
 const btnP = {
-  padding: "14px 32px", background: `linear-gradient(135deg, ${tk.accent}, ${tk.accentDark})`,
-  color: tk.bg, border: "none", borderRadius: "8px", fontSize: "15px", fontWeight: 700,
-  fontFamily: sans, cursor: "pointer", transition: "transform 0.15s, box-shadow 0.2s",
+  padding: "14px 32px", background: tk.accent,
+  color: "#FFFFFF", border: "none", borderRadius: "8px", fontSize: "15px", fontWeight: 600,
+  fontFamily: sans, cursor: "pointer", transition: "transform 0.15s, box-shadow 0.2s, background 0.2s",
 };
 const btnS = {
   padding: "12px 24px", background: "transparent", color: tk.accent,
@@ -87,8 +88,21 @@ const btnS = {
 };
 
 // ─── Helpers ───
-const emptyOutorgante = () => ({ nome: "", nacionalidade: "brasileiro(a)", estadoCivil: "", profissao: "", cpf: "", rg: "", orgaoExpedidor: "", endereco: "" });
-const emptyOutorgado = () => ({ nome: "", nacionalidade: "brasileiro(a)", profissao: "", cpf: "", oab: "", endereco: "" });
+const emptyOutorgante = () => ({ nome: "", nacionalidade: "brasileiro(a)", estadoCivil: "", profissao: "", cpf: "", rg: "", orgaoExpedidor: "", cep: "", rua: "", numero: "", complemento: "", bairro: "", cidade: "", uf: "" });
+const emptyOutorgado = () => ({ nome: "", nacionalidade: "brasileiro(a)", profissao: "", cpf: "", oab: "", cep: "", rua: "", numero: "", complemento: "", bairro: "", cidade: "", uf: "" });
+
+// Helper: format address from fields
+function formatEndereco(o) {
+  let end = "";
+  if (o.rua) end += o.rua;
+  if (o.numero) end += ", " + o.numero;
+  if (o.complemento) end += ", " + o.complemento;
+  if (o.bairro) end += ", " + o.bairro;
+  if (o.cidade) end += ", " + o.cidade;
+  if (o.uf) end += "/" + o.uf;
+  if (o.cep) end += " - CEP: " + o.cep;
+  return end;
+}
 
 function buildVarMap(form) {
   const foro = form.foro || "";
@@ -98,12 +112,12 @@ function buildVarMap(form) {
   const outorgadosTexto = form.outorgados.map((o, i) => {
     let t = `${o.nome}, ${o.nacionalidade}, ${o.profissao}, CPF ${o.cpf}`;
     if (o.oab) t += `, OAB ${o.oab}`;
-    const end = i === 0 ? o.endereco : (o.endereco || form.outorgados[0].endereco);
+    const end = i === 0 ? formatEndereco(o) : (formatEndereco(o) || formatEndereco(form.outorgados[0]));
     if (end) t += `, com endereço profissional em ${end}`;
     return t;
   }).join("; e ");
   const outorgantesTexto = form.outorgantes.map(o => {
-    return `${o.nome}, ${o.nacionalidade}, ${o.estadoCivil}, ${o.profissao}, CPF ${o.cpf}, RG ${o.rg} - ${o.orgaoExpedidor}, residente em ${o.endereco}`;
+    return `${o.nome}, ${o.nacionalidade}, ${o.estadoCivil}, ${o.profissao}, CPF ${o.cpf}, RG ${o.rg} - ${o.orgaoExpedidor}, residente em ${formatEndereco(o)}`;
   }).join("; e ");
   const o1 = form.outorgantes[0] || {};
   return {
@@ -114,7 +128,7 @@ function buildVarMap(form) {
     "{{CPF_OUTORGANTE}}": o1.cpf || "",
     "{{RG_OUTORGANTE}}": o1.rg || "",
     "{{ORGAO_EXPEDIDOR}}": o1.orgaoExpedidor || "",
-    "{{ENDERECO_OUTORGANTE}}": o1.endereco || "",
+    "{{ENDERECO_OUTORGANTE}}": formatEndereco(o1),
     "{{OUTORGANTES}}": outorgantesTexto,
     "{{OUTORGADOS}}": outorgadosTexto,
     "{{NOME_OUTORGADO}}": form.outorgados[0]?.nome || "",
@@ -122,7 +136,7 @@ function buildVarMap(form) {
     "{{PROFISSAO_OUTORGADO}}": form.outorgados[0]?.profissao || "",
     "{{CPF_OUTORGADO}}": form.outorgados[0]?.cpf || "",
     "{{OAB_OUTORGADO}}": form.outorgados[0]?.oab || "",
-    "{{ENDERECO_OUTORGADO}}": form.outorgados[0]?.endereco || "",
+    "{{ENDERECO_OUTORGADO}}": formatEndereco(form.outorgados[0] || {}),
     "{{PODERES}}": poderes,
     "{{FORO}}": foro,
     "{{DATA}}": `${now.getDate()} de ${meses[now.getMonth()]} de ${now.getFullYear()}`,
@@ -208,6 +222,41 @@ async function extrairTimbrado(arrayBuffer) {
       if (lines.join("").length > footerLines.join("").length) footerLines = lines;
     }
 
+    // Also extract VML shape dimensions from header/footer XML
+    let headerShapeW = 0, headerShapeH = 0;
+    for (const hf of headerFiles) {
+      const xml = await zip.file(hf).async("string");
+      const styleMatch = xml.match(/v:shape[^>]*style="([^"]*)"/);
+      if (styleMatch) {
+        const wMatch = styleMatch[1].match(/width:\s*([\d.]+)pt/);
+        const hMatch = styleMatch[1].match(/height:\s*([\d.]+)pt/);
+        if (wMatch) headerShapeW = parseFloat(wMatch[1]) * 0.3528; // pt to mm
+        if (hMatch) headerShapeH = parseFloat(hMatch[1]) * 0.3528;
+      }
+    }
+
+    let footerShapeW = 0, footerShapeH = 0;
+    for (const ff of footerFiles) {
+      const xml = await zip.file(ff).async("string");
+      const styleMatch = xml.match(/v:shape[^>]*style="([^"]*)"/);
+      if (styleMatch) {
+        const wMatch = styleMatch[1].match(/width:\s*([\d.]+)pt/);
+        const hMatch = styleMatch[1].match(/height:\s*([\d.]+)pt/);
+        if (wMatch) footerShapeW = parseFloat(wMatch[1]) * 0.3528;
+        if (hMatch) footerShapeH = parseFloat(hMatch[1]) * 0.3528;
+      }
+    }
+
+    // Attach shape dimensions to images
+    if (headerImg && headerShapeW > 0) {
+      headerImg.shapeW = headerShapeW;
+      headerImg.shapeH = headerShapeH;
+    }
+    if (footerImg && footerShapeW > 0) {
+      footerImg.shapeW = footerShapeW;
+      footerImg.shapeH = footerShapeH;
+    }
+
     console.log("Timbrado extraído:", {
       hasHeaderImg: !!headerImg,
       headerImgSize: headerImg ? `${headerImg.width}x${headerImg.height}` : "none",
@@ -242,12 +291,19 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
   const hasHeader = timbrado.headerImg || timbrado.headerLines.length > 0;
   const hasFooter = timbrado.footerImg || timbrado.footerLines.length > 0;
 
-  // Helper: add image proportionally
-  const addImgProportional = (img, xStart, maxW, maxH, yPos) => {
-    const ratio = img.width / img.height;
-    let w = maxW;
-    let h = w / ratio;
-    if (h > maxH) { h = maxH; w = h * ratio; }
+  // Helper: add image with exact or proportional sizing
+  const addImg = (img, xStart, maxW, maxH, yPos) => {
+    // Use VML shape dimensions if available (exact match to Word)
+    let w, h;
+    if (img.shapeW && img.shapeH) {
+      w = Math.min(img.shapeW, maxW);
+      h = img.shapeH * (w / img.shapeW);
+    } else {
+      const ratio = img.width / img.height;
+      w = maxW;
+      h = w / ratio;
+      if (h > maxH) { h = maxH; w = h * ratio; }
+    }
     const imgData = "data:image/" + img.format.toLowerCase() + ";base64," + img.base64;
     const imgX = xStart + (maxW - w) / 2;
     doc.addImage(imgData, img.format, imgX, yPos, w, h);
@@ -259,9 +315,9 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
     if (!hasFooter) return;
     if (timbrado.footerImg) {
       try {
-        const maxH = 12;
-        const fY = pageH - maxH - 5;
-        addImgProportional(timbrado.footerImg, marginL, contentW, maxH, fY);
+        const fH = timbrado.footerImg.shapeH || 15;
+        const fY = pageH - fH - 5;
+        addImg(timbrado.footerImg, marginL, contentW, fH + 5, fY);
       } catch (e) { console.warn("Footer image error:", e); }
     } else if (timbrado.footerLines.length > 0) {
       doc.setFontSize(7);
@@ -281,7 +337,8 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
     if (!hasHeader) return;
     if (timbrado.headerImg) {
       try {
-        const h = addImgProportional(timbrado.headerImg, marginL, contentW, 25, y);
+        const maxH = timbrado.headerImg.shapeH || 35;
+        const h = addImg(timbrado.headerImg, marginL, contentW, maxH + 5, y);
         y += h + 3;
       } catch (e) { console.warn("Header image error:", e); }
     }
@@ -294,9 +351,6 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
       }
       y += 1;
     }
-    doc.setDrawColor(40);
-    doc.setLineWidth(0.5);
-    doc.line(marginL, y, pageW - marginR, y);
     y += 10;
   };
 
@@ -306,7 +360,34 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
   doc.setFontSize(12);
   doc.setTextColor(0);
 
-  const bottomLimit = hasFooter ? pageH - 22 : pageH - 20;
+  // Justify text: spread words across full width
+  const justifyLine = (text, xStart, width, yPos) => {
+    const words = text.trim().split(/\s+/);
+    if (words.length <= 1) {
+      doc.text(text, xStart, yPos);
+      return;
+    }
+    const totalTextW = doc.getTextWidth(words.join(""));
+    const totalSpace = width - totalTextW;
+    const spaceW = totalSpace / (words.length - 1);
+    let x = xStart;
+    for (let i = 0; i < words.length; i++) {
+      doc.text(words[i], x, yPos);
+      x += doc.getTextWidth(words[i]) + spaceW;
+    }
+  };
+
+  // Render a line: justify if not the last line of a paragraph, left-align if last
+  const renderLine = (text, xStart, width, yPos, isLastLine) => {
+    if (isLastLine || text.trim().split(/\s+/).length <= 2) {
+      doc.text(text, xStart, yPos);
+    } else {
+      justifyLine(text, xStart, width, yPos);
+    }
+  };
+
+  const footerHeight = timbrado.footerImg?.shapeH || (hasFooter ? 15 : 0);
+  const bottomLimit = hasFooter ? pageH - footerHeight - 12 : pageH - 20;
 
   const paragraphs = texto.split("\n");
   for (const para of paragraphs) {
@@ -353,15 +434,23 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
         const fullLines = doc.splitTextToSize(trimmed, contentW);
         for (let li = 0; li < fullLines.length; li++) {
           if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
+          const isLast = li === fullLines.length - 1;
           if (li === 0 && fullLines[0].startsWith(labelPart)) {
+            // First line: bold label + justified rest
             doc.setFont("times", "bold");
-            doc.text(labelPart, marginL, y);
             const labelW = doc.getTextWidth(labelPart);
+            doc.text(labelPart, marginL, y);
             doc.setFont("times", "normal");
-            doc.text(fullLines[0].substring(labelPart.length), marginL + labelW, y);
+            const restText = fullLines[0].substring(labelPart.length).trim();
+            if (!isLast && restText.split(/\s+/).length > 2) {
+              const restWidth = contentW - labelW;
+              justifyLine(restText, marginL + labelW, restWidth, y);
+            } else {
+              doc.text(fullLines[0].substring(labelPart.length), marginL + labelW, y);
+            }
           } else {
             doc.setFont("times", "normal");
-            doc.text(fullLines[li], marginL, y);
+            renderLine(fullLines[li], marginL, contentW, y, isLast);
           }
           y += 5.5;
         }
@@ -371,9 +460,9 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
     } else {
       doc.setFont("times", "normal");
       const lines = doc.splitTextToSize(trimmed, contentW);
-      for (const line of lines) {
+      for (let li = 0; li < lines.length; li++) {
         if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
-        doc.text(line, marginL, y);
+        renderLine(lines[li], marginL, contentW, y, li === lines.length - 1);
         y += 5.5;
       }
       y += 3;
@@ -425,6 +514,66 @@ function MaskedInput({ label, value, onChange, placeholder, required, mask }) {
       <input value={value} onChange={e => onChange(mask ? mask(e.target.value) : e.target.value)} placeholder={placeholder}
         onFocus={() => setF(true)} onBlur={() => setF(false)}
         style={{ ...inputBase, borderColor: f ? tk.borderFocus : tk.border, boxShadow: f ? `0 0 0 3px ${tk.accent}22` : "none" }} />
+    </div>
+  );
+}
+
+// ─── CEP / Address ───
+function maskCEP(v) {
+  const d = v.replace(/\D/g, "").slice(0, 8);
+  if (d.length <= 5) return d;
+  return `${d.slice(0,5)}-${d.slice(5)}`;
+}
+
+async function buscarCEP(cep) {
+  const clean = cep.replace(/\D/g, "");
+  if (clean.length !== 8) return null;
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${clean}/json/`);
+    const data = await res.json();
+    if (data.erro) return null;
+    return { rua: data.logradouro || "", bairro: data.bairro || "", cidade: data.localidade || "", uf: data.uf || "" };
+  } catch { return null; }
+}
+
+function EnderecoFields({ prefix, data, onUpdate }) {
+  const [loading, setLoading] = useState(false);
+  const [cepOk, setCepOk] = useState(false);
+
+  const handleCEP = async (val) => {
+    const masked = maskCEP(val);
+    onUpdate("cep", masked);
+    setCepOk(false);
+    const clean = masked.replace(/\D/g, "");
+    if (clean.length === 8) {
+      setLoading(true);
+      const result = await buscarCEP(clean);
+      setLoading(false);
+      if (result) {
+        onUpdate("rua", result.rua);
+        onUpdate("bairro", result.bairro);
+        onUpdate("cidade", result.cidade);
+        onUpdate("uf", result.uf);
+        setCepOk(true);
+      }
+    }
+  };
+
+  return (
+    <div style={{ gridColumn: "1/-1" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+        <div style={{ position: "relative" }}>
+          <MaskedInput label="CEP" value={data.cep || ""} onChange={handleCEP} placeholder="00000-000" required mask={null} />
+          {loading && <div style={{ position: "absolute", right: "12px", top: "32px", fontSize: "12px", color: tk.accent }}>Buscando...</div>}
+          {cepOk && <div style={{ position: "absolute", right: "12px", top: "32px", fontSize: "12px", color: tk.success }}>✓</div>}
+        </div>
+        <Input label="UF" value={data.uf || ""} onChange={v => onUpdate("uf", v)} placeholder="SP" required />
+        <div style={{ gridColumn: "1/-1" }}><Input label="Rua" value={data.rua || ""} onChange={v => onUpdate("rua", v)} placeholder="Rua / Avenida" required /></div>
+        <Input label="Número" value={data.numero || ""} onChange={v => onUpdate("numero", v)} placeholder="Nº" required />
+        <Input label="Complemento" value={data.complemento || ""} onChange={v => onUpdate("complemento", v)} placeholder="Apto, sala (opcional)" />
+        <Input label="Bairro" value={data.bairro || ""} onChange={v => onUpdate("bairro", v)} placeholder="Bairro" required />
+        <Input label="Cidade" value={data.cidade || ""} onChange={v => onUpdate("cidade", v)} placeholder="Cidade" required />
+      </div>
     </div>
   );
 }
@@ -581,7 +730,8 @@ function StepTemplate({ form, setForm }) {
                 textAlign: "center", cursor: "pointer", background: dragOver ? `${tk.accent}08` : "transparent" }}>
               <div style={{ fontSize: "36px", marginBottom: "12px", opacity: 0.6 }}>📄</div>
               <div style={{ fontFamily: sans, fontSize: "15px", color: tk.text, fontWeight: 600, marginBottom: "6px" }}>Arraste um documento com seu papel timbrado</div>
-              <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted }}>Pode ser qualquer documento .docx do escritório</div>
+              <div style={{ fontFamily: sans, fontSize: "13px", color: tk.textMuted, marginBottom: "8px" }}>Pode ser qualquer documento do escritório</div>
+              <div style={{ fontFamily: sans, fontSize: "12px", color: tk.accent, fontWeight: 600, padding: "4px 12px", background: `${tk.accent}10`, borderRadius: "4px", display: "inline-block" }}>Apenas arquivos .docx (Word)</div>
               <input ref={fileRef} type="file" accept=".docx" onChange={e => { if (e.target.files[0]) parse(e.target.files[0]); }} style={{ display: "none" }} />
             </div>
           ) : (
@@ -674,7 +824,7 @@ function StepOutorgantes({ form, setForm }) {
             <MaskedInput label="CPF" value={o.cpf} onChange={v => update(idx, "cpf", v)} placeholder="000.000.000-00" required mask={maskCPF} />
             <MaskedInput label="RG" value={o.rg} onChange={v => update(idx, "rg", v)} placeholder="00.000.000-0" required mask={maskRG} />
             <Input label="Órgão Expedidor" value={o.orgaoExpedidor} onChange={v => update(idx, "orgaoExpedidor", v)} placeholder="SSP/SP" required />
-            <div style={{ gridColumn: "1/-1" }}><Input label="Endereço completo" value={o.endereco} onChange={v => update(idx, "endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required /></div>
+            <EnderecoFields data={o} onUpdate={(key, val) => update(idx, key, val)} />
           </div>
         </div>
       ))}
@@ -742,9 +892,7 @@ function StepOutorgados({ form, setForm }) {
             <MaskedInput label="CPF" value={o.cpf} onChange={v => update(idx, "cpf", v)} placeholder="000.000.000-00" required mask={maskCPF} />
             {isAdv && <MaskedInput label="OAB" value={o.oab} onChange={v => update(idx, "oab", v)} placeholder="OAB/SP 000.000" required mask={maskOAB} />}
             {idx === 0 && (
-              <div style={{ gridColumn: "1/-1" }}>
-                <Input label="Endereço profissional" value={o.endereco} onChange={v => update(idx, "endereco", v)} placeholder="Rua, nº, bairro, cidade, UF, CEP" required />
-              </div>
+              <EnderecoFields data={o} onUpdate={(key, val) => update(idx, key, val)} />
             )}
           </div>
         </div>
@@ -801,7 +949,7 @@ function StepPoderes({ form, setForm }) {
 }
 
 // ─── Step 6: Revisão e Geração ───
-function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPDF, docxReady, copied }) {
+function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPDF, onCopy, docxReady, copied, pdfSaved }) {
   const tipoLabel = TIPOS_PROCURACAO.find(x => x.id === form.tipo)?.label || form.tipo;
   const foro = form.foro || "";
 
@@ -853,17 +1001,17 @@ function StepRevisao({ form, resultado, loading, onGerar, onGerarDocx, onGerarPD
           <div style={{ marginTop: "20px", padding: "28px", background: "#FDFBF7", borderRadius: "10px",
             border: `1px solid ${tk.accentLight}`, color: "#1A1A1A",
             fontFamily: "Georgia, serif", fontSize: "14px", lineHeight: "1.8",
-            whiteSpace: "pre-wrap", maxHeight: "420px", overflowY: "auto" }}>
+            whiteSpace: "pre-wrap", maxHeight: "420px", overflowY: "auto", textAlign: "justify" }}>
             {resultado}
           </div>
           <div style={{ display: "flex", gap: "10px", marginTop: "16px", flexWrap: "wrap" }}>
-            <button onClick={() => { navigator.clipboard.writeText(resultado); }}
+            <button onClick={onCopy}
               style={{ ...btnS, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
               {copied ? "✓ Copiado!" : "📋 Copiar texto"}
             </button>
             <button onClick={onGerarPDF}
               style={{ ...btnP, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-              📄 {form.templateMode === "template" && form.templateArrayBuffer ? "Salvar PDF com timbrado" : "Salvar PDF"}
+              {pdfSaved ? "✓ Salvo!" : (form.templateMode === "template" && form.templateArrayBuffer ? "📄 Salvar PDF com timbrado" : "📄 Salvar PDF")}
             </button>
             {form.templateMode === "template" && form.templateArrayBuffer && (
               <button onClick={onGerarDocx} style={{ ...btnS, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", borderColor: tk.accent }}>
@@ -884,6 +1032,7 @@ export default function App() {
   const [resultado, setResultado] = useState("");
   const [docxReady, setDocxReady] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [pdfSaved, setPdfSaved] = useState(false);
   const ref = useRef(null);
 
   const [form, setForm] = useState({
@@ -900,11 +1049,11 @@ export default function App() {
   const handleCopy = () => {
     navigator.clipboard.writeText(resultado);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 10000);
   };
 
   const gerar = async () => {
-    setLoading(true); setResultado(""); setDocxReady(false); setCopied(false);
+    setLoading(true); setResultado(""); setDocxReady(false); setCopied(false); setPdfSaved(false);
     const tipoLabel = TIPOS_PROCURACAO.find(x => x.id === form.tipo)?.label || form.tipo;
     const foro = form.foro || "";
     const poderes = [...(form.poderesSelecionados || []), ...(form.poderesExtras ? [form.poderesExtras] : [])].join(";\n");
@@ -1004,8 +1153,8 @@ export default function App() {
       case 5: {
         const pdfName = form.templateMode === "template" && form.templateArrayBuffer
           ? `procuracao_${form.outorgantes[0]?.nome.replace(/\s+/g, "_") || "nova"}.pdf`
-          : `Gerador_Procuracoes.pdf`;
-        return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} onGerarPDF={() => gerarPDF(resultado, form.templateMode === "template" ? form.templateArrayBuffer : null, pdfName)} docxReady={docxReady} copied={copied} />;
+          : `procuracao_${form.outorgantes[0]?.nome.replace(/\s+/g, "_") || "nova"}.pdf`;
+        return <StepRevisao form={form} resultado={resultado} loading={loading} onGerar={gerar} onGerarDocx={gerarDocx} onGerarPDF={async () => { await gerarPDF(resultado, form.templateMode === "template" ? form.templateArrayBuffer : null, pdfName); setPdfSaved(true); setTimeout(() => setPdfSaved(false), 10000); }} onCopy={() => { navigator.clipboard.writeText(resultado); setCopied(true); setTimeout(() => setCopied(false), 10000); }} docxReady={docxReady} copied={copied} pdfSaved={pdfSaved} />;
       }
       default: return null;
     }
@@ -1015,7 +1164,7 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: tk.bg, fontFamily: sans, color: tk.text,
       display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 20px" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         * { box-sizing: border-box; margin: 0; }
@@ -1026,32 +1175,38 @@ export default function App() {
       `}</style>
 
       <div style={{ textAlign: "center", marginBottom: "36px" }}>
-        <div style={{ fontSize: "13px", fontWeight: 700, color: tk.accent, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>Gerador Inteligente</div>
-        <h1 style={{ fontFamily: serif, fontSize: "42px", fontWeight: 600, color: tk.text, margin: 0, lineHeight: 1.1 }}>Procurações Jurídicas</h1>
-        <p style={{ fontFamily: sans, fontSize: "15px", color: tk.textMuted, marginTop: "12px", maxWidth: "420px" }}>
-          Gere com IA ou preencha seu template .docx automaticamente
+        <h1 style={{ fontFamily: serif, fontSize: "32px", fontWeight: 700, color: tk.accent, margin: 0, lineHeight: 1.2 }}>Gerador de Procurações</h1>
+        <p style={{ fontFamily: sans, fontSize: "14px", color: tk.textMuted, marginTop: "8px", maxWidth: "380px", margin: "8px auto 0" }}>
+          Gere procurações em segundos
         </p>
       </div>
 
-      <div style={{ width: "100%", maxWidth: "660px", background: `${tk.surface}88`, backdropFilter: "blur(12px)",
-        borderRadius: "16px", border: `1px solid ${tk.border}`, overflow: "hidden" }}>
+      <div style={{ width: "100%", maxWidth: "660px", background: tk.surface,
+        borderRadius: "12px", border: `1px solid ${tk.border}`, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
         <div style={{ padding: "28px 32px 0" }}><Steps current={step} total={N} /></div>
         <div ref={ref} style={{ padding: "0 32px 28px", maxHeight: "60vh", overflowY: "auto", animation: "fadeIn 0.3s ease" }}>
           {stepView()}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", padding: "20px 32px",
-          borderTop: `1px solid ${tk.border}`, background: `${tk.bg}88` }}>
-          <button onClick={() => { setStep(s => s - 1); if (step === 5) { setResultado(""); setDocxReady(false); setCopied(false); } }}
+          borderTop: `1px solid ${tk.border}`, background: tk.surface }}>
+          <button onClick={() => { setStep(s => s - 1); if (step === 5) { setResultado(""); setDocxReady(false); setCopied(false); setPdfSaved(false); } }}
             disabled={step === 0} style={{ ...btnS, opacity: step === 0 ? 0.3 : 1, cursor: step === 0 ? "default" : "pointer" }}>← Voltar</button>
           {step < N - 1 && (
-            <button onClick={() => setStep(s => s + 1)} style={btnP}
-              onMouseEnter={e => { e.target.style.transform = "translateY(-1px)"; e.target.style.boxShadow = `0 4px 20px ${tk.accent}44`; }}
-              onMouseLeave={e => { e.target.style.transform = "none"; e.target.style.boxShadow = "none"; }}>Próximo →</button>
+            <button onClick={() => {
+              // Block advancing from template step if no file uploaded
+              if (step === 1 && form.templateMode === "template" && !form.templateArrayBuffer) {
+                alert("Faça upload de um arquivo .docx com seu papel timbrado para continuar.");
+                return;
+              }
+              setStep(s => s + 1);
+            }} style={btnP}
+              onMouseEnter={e => { e.target.style.transform = "translateY(-1px)"; e.target.style.background = tk.accentDark; }}
+              onMouseLeave={e => { e.target.style.transform = "none"; e.target.style.background = tk.accent; }}>Próximo →</button>
           )}
         </div>
       </div>
       <div style={{ marginTop: "32px", fontSize: "12px", color: tk.textDim, textAlign: "center" }}>
-        Documento gerado por IA — revisão profissional recomendada antes do uso
+        Revise o documento antes de assinar
       </div>
     </div>
   );

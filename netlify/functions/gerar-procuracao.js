@@ -11,6 +11,19 @@ exports.handler = async function (event) {
   try {
     const { tipo, outorgantes, outorgados, poderes, foro } = JSON.parse(event.body);
 
+    // Helper to format address from fields
+    const fmtEnd = (o) => {
+      let end = "";
+      if (o.rua) end += o.rua;
+      if (o.numero) end += ", " + o.numero;
+      if (o.complemento) end += ", " + o.complemento;
+      if (o.bairro) end += ", " + o.bairro;
+      if (o.cidade) end += ", Cidade e Comarca de " + o.cidade;
+      if (o.uf) end += "/" + o.uf;
+      if (o.cep) end += " - CEP: " + o.cep;
+      return end || o.endereco || "";
+    };
+
     const outorgantesTexto = outorgantes.map((o, i) => {
       return `OUTORGANTE ${outorgantes.length > 1 ? (i + 1) : ""}:
 - Nome: ${o.nome}
@@ -19,11 +32,11 @@ exports.handler = async function (event) {
 - Profissão: ${o.profissao}
 - CPF: ${o.cpf}
 - RG: ${o.rg} - ${o.orgaoExpedidor}
-- Endereço: ${o.endereco}`;
+- Endereço: ${fmtEnd(o)}`;
     }).join("\n\n");
 
     const outorgadosTexto = outorgados.map((o, i) => {
-      const endereco = o.endereco || outorgados[0].endereco;
+      const endereco = fmtEnd(o) || fmtEnd(outorgados[0]);
       let texto = `OUTORGADO ${outorgados.length > 1 ? (i + 1) : ""}:
 - Nome: ${o.nome}
 - Nacionalidade: ${o.nacionalidade}
