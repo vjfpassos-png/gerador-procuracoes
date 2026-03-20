@@ -356,7 +356,7 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
 
   addHeader();
 
-  doc.setFont("times", "normal");
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(12);
   doc.setTextColor(0);
 
@@ -405,7 +405,7 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
 
     if (isTitle) {
       y += 4;
-      doc.setFont("times", "bold");
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(14);
       const lines = doc.splitTextToSize(trimmed, contentW);
       for (const line of lines) {
@@ -414,7 +414,7 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
         y += 7;
       }
       y += 6;
-      doc.setFont("times", "normal");
+      doc.setFont("helvetica", "normal");
       doc.setFontSize(12);
     } else if (isSigLine) {
       y += 10;
@@ -423,9 +423,9 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
       y += 5;
     } else if (isSigName) {
       if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
-      doc.setFont("times", "bold");
+      doc.setFont("helvetica", "bold");
       doc.text(trimmed, pageW / 2, y, { align: "center" });
-      doc.setFont("times", "normal");
+      doc.setFont("helvetica", "normal");
       y += 8;
     } else if (isLabel) {
       const colonIdx = trimmed.indexOf(":");
@@ -437,10 +437,10 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
           const isLast = li === fullLines.length - 1;
           if (li === 0 && fullLines[0].startsWith(labelPart)) {
             // First line: bold label + justified rest
-            doc.setFont("times", "bold");
+            doc.setFont("helvetica", "bold");
             const labelW = doc.getTextWidth(labelPart);
             doc.text(labelPart, marginL, y);
-            doc.setFont("times", "normal");
+            doc.setFont("helvetica", "normal");
             const restText = fullLines[0].substring(labelPart.length).trim();
             if (!isLast && restText.split(/\s+/).length > 2) {
               const restWidth = contentW - labelW;
@@ -449,7 +449,7 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
               doc.text(fullLines[0].substring(labelPart.length), marginL + labelW, y);
             }
           } else {
-            doc.setFont("times", "normal");
+            doc.setFont("helvetica", "normal");
             renderLine(fullLines[li], marginL, contentW, y, isLast);
           }
           y += 5.5;
@@ -458,7 +458,7 @@ async function gerarPDF(texto, templateArrayBuffer, fileName) {
         continue;
       }
     } else {
-      doc.setFont("times", "normal");
+      doc.setFont("helvetica", "normal");
       const lines = doc.splitTextToSize(trimmed, contentW);
       for (let li = 0; li < lines.length; li++) {
         if (y > bottomLimit) { addFooter(); doc.addPage(); y = 20; }
